@@ -15,12 +15,11 @@
    bukan oleh kerahasiaan apiKey.
 ===================================================== */
 
-const FIREBASE_CONFIG = {
-  apiKey: "GANTI_DENGAN_API_KEY_ANDA",
-  authDomain: "GANTI-PROJECT-ID.firebaseapp.com",
-  databaseURL: "https://GANTI-PROJECT-ID-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "GANTI-PROJECT-ID",
-  storageBucket: "GANTI-PROJECT-ID.appspot.com",
-  messagingSenderId: "GANTI_SENDER_ID",
-  appId: "GANTI_APP_ID"
+const firebaseConfig = {
+  apiKey: "AIzaSyAxiLpE8LA-VYdykAH4vUMTWK2Tx_GjdtE",
+  authDomain: "oee-mmi.firebaseapp.com",
+  projectId: "oee-mmi",
+  storageBucket: "oee-mmi.firebasestorage.app",
+  messagingSenderId: "97915071019",
+  appId: "1:97915071019:web:49a665a6a11d27b38f986e"
 };
