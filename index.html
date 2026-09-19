@@ -635,12 +635,18 @@ function seedData(){
     }
   }
 
+  const allowedStops = [
+    {id:uid(), nama:'Istirahat / Sholat', durasiMenit:60, aktif:true},
+    {id:uid(), nama:'Briefing & Cleaning Awal Shift', durasiMenit:15, aktif:true},
+  ];
+
   return {
     users: [],
     produk, mesin, operator, kapasitas, shiftMaster, oeeInput, downtime,
     settings:{
       companyName:'PT MMI — Maklon & Manufaktur Parfum',
       downtimeCategories,
+      allowedStops,
       oeeTargets:{ oee:0.85, availability:0.9, performance:0.95, quality:0.99 },
     }
   };
@@ -659,6 +665,7 @@ function ensureShape(){
   if(!DB.users) DB.users = [];
   if(!DB.settings.downtimeCategories) DB.settings.downtimeCategories = seed.settings.downtimeCategories;
   if(!DB.settings.oeeTargets) DB.settings.oeeTargets = seed.settings.oeeTargets;
+  if(!DB.settings.allowedStops) DB.settings.allowedStops = seed.settings.allowedStops;
 }
 function snapshotShadow(){
   _shadow = {};
@@ -787,8 +794,17 @@ function getIdealRate(produkId, mesinId){
   const p = DB.produk.find(x=>x.id===produkId);
   return p ? p.kapasitasPcsPerJam : 0;
 }
+/* Total menit "stop yang diizinkan" per shift — berlaku untuk SEMUA mesin & produk
+   (mis. istirahat/sholat, briefing awal shift). Ini BUKAN downtime: mengurangi
+   Planned Time sebelum OEE dihitung, sehingga tidak menghukum Availability. */
+function totalAllowedStopMinutes(){
+  const list = (DB.settings && DB.settings.allowedStops) || [];
+  return list.reduce((s,x)=> s + (x.aktif!==false ? (x.durasiMenit||0) : 0), 0);
+}
 function calcOeeRow(row){
-  const planned = row.plannedTimeMenit || 0;
+  const rawPlanned = row.plannedTimeMenit || 0;
+  const allowedStop = totalAllowedStopMinutes();
+  const planned = Math.max(rawPlanned - allowedStop, 0); // Net Planned Production Time
   const downtimeMenit = row.downtimeMenit || 0;
   const operating = Math.max(planned - downtimeMenit, 0);
   const idealRate = getIdealRate(row.produkId, row.mesinId); // pcs/hour
@@ -806,7 +822,7 @@ function calcOeeRow(row){
   const goodCount = Math.max(totalCount-rejectCount,0);
   const quality = totalCount>0 ? clamp(goodCount/totalCount,0,1) : 0;
   const oee = availability*performance*quality;
-  return {availability, performance, quality, oee, operating, goodCount, idealRate};
+  return {availability, performance, quality, oee, operating, goodCount, idealRate, netPlanned:planned, allowedStop};
 }
 function aggregateOee(rows){
   if(!rows.length) return {availability:0,performance:0,quality:0,oee:0,totalCount:0,rejectCount:0,downtimeMenit:0,plannedTimeMenit:0,n:0};
@@ -1416,6 +1432,7 @@ PAGE_RENDERERS.oeeInput = function(mount){
         <td>${escapeHtml(produkName(r.produkId))}</td>
         <td>${escapeHtml(operatorName(r.operatorId))}</td>
         <td class="num">${fmtNum(r.plannedTimeMenit,0)}</td>
+        <td class="num" style="color:var(--ink-400);">${fmtNum(c.netPlanned,0)}</td>
         <td class="num">${fmtNum(r.downtimeMenit,0)}</td>
         <td class="num">${fmtNum(r.totalCount,0)}</td>
         <td class="num">${fmtNum(r.rejectCount,0)}</td>
@@ -1424,7 +1441,7 @@ PAGE_RENDERERS.oeeInput = function(mount){
           ${canEdit?`<button class="icon-btn" data-edit="${r.id}" title="Edit">✎</button><button class="icon-btn del" data-del="${r.id}" title="Hapus">🗑</button>`:''}
         </div></td>
       </tr>`;
-    }).join('') : `<tr class="empty-row"><td colspan="11">Tidak ada data pada filter ini.</td></tr>`;
+    }).join('') : `<tr class="empty-row"><td colspan="12">Tidak ada data pada filter ini.</td></tr>`;
     document.getElementById('oeeTableBody').innerHTML = body;
     document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openForm(b.dataset.edit));
     document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
@@ -1448,6 +1465,9 @@ PAGE_RENDERERS.oeeInput = function(mount){
           <div class="field"><label>Total Downtime (menit) *</label><input type="number" name="downtimeMenit" value="${row.downtimeMenit??0}" required></div>
           <div class="field"><label>Total Produksi (pcs) *</label><input type="number" name="totalCount" value="${row.totalCount??0}" required></div>
           <div class="field"><label>Reject (pcs) *</label><input type="number" name="rejectCount" value="${row.rejectCount??0}" required></div>
+          <div class="field full" style="background:var(--ink-850);border-radius:6px;padding:9px 12px;">
+            <span style="font-size:12px;color:var(--ink-200);">ℹ️ ${fmtNum(totalAllowedStopMinutes(),0)} menit/shift waktu stop yang diizinkan (lihat Pengaturan) otomatis dikurangi dari Planned Time — <b>bukan</b> downtime, tidak perlu dimasukkan ke kolom Total Downtime.</span>
+          </div>
           <div class="field full"><label>Catatan</label><input type="text" name="catatan" value="${escapeHtml(row.catatan||'')}"></div>
         </div>
         <div class="form-actions">
@@ -1477,7 +1497,7 @@ PAGE_RENDERERS.oeeInput = function(mount){
       ${canEdit?`<button class="btn btn-primary btn-sm" id="addOeeBtn">+ Tambah Input</button>`:''}
     </div>
     <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Tanggal</th><th>Shift</th><th>Mesin</th><th>Produk</th><th>Operator</th><th>Planned (mnt)</th><th>Downtime (mnt)</th><th>Total (pcs)</th><th>Reject (pcs)</th><th>OEE</th><th>Aksi</th></tr></thead>
+      <thead><tr><th>Tanggal</th><th>Shift</th><th>Mesin</th><th>Produk</th><th>Operator</th><th>Planned (mnt)</th><th>Net Planned</th><th>Downtime (mnt)</th><th>Total (pcs)</th><th>Reject (pcs)</th><th>OEE</th><th>Aksi</th></tr></thead>
       <tbody id="oeeTableBody"></tbody>
     </table></div>
   `;
@@ -1878,6 +1898,25 @@ PAGE_RENDERERS.settings = function(mount){
       </div>
 
       <div class="card settings-block">
+        <h4>Waktu Stop yang Diizinkan (Bukan Downtime)
+          <span class="hint" style="font-family:var(--font-mono);font-size:11px;color:var(--ink-400);">Berlaku global untuk semua mesin &amp; produk</span>
+        </h4>
+        <p style="font-size:12.5px;color:var(--ink-200);margin-bottom:12px;line-height:1.55;">
+          Waktu berhenti yang memang direncanakan — misalnya istirahat/sholat atau briefing awal shift —
+          bukan kegagalan mesin. Total menit di bawah ini otomatis <b>dikurangi dari Planned Time</b> setiap
+          input OEE sebelum Availability dihitung, dan <b>tidak</b> tercatat sebagai downtime maupun masuk ke Pareto downtime.
+        </p>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Nama</th><th>Durasi (mnt)</th><th>Status</th><th>Aksi</th></tr></thead>
+          <tbody id="allowedStopBody"></tbody>
+        </table></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:8px;">
+          <button class="btn btn-ghost btn-sm" id="addAllowedStopBtn">+ Tambah Waktu Stop</button>
+          <span class="pill good" id="allowedStopTotal"></span>
+        </div>
+      </div>
+
+      <div class="card settings-block">
         <h4>Cadangan Data</h4>
         <p style="font-size:12.5px;color:var(--ink-200);margin-bottom:12px;">Unduh seluruh data sebagai berkas JSON untuk cadangan, atau pulihkan dari berkas cadangan.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -1887,7 +1926,8 @@ PAGE_RENDERERS.settings = function(mount){
         </div>
       </div>
     `;
-    renderCatChips(); renderShiftTable();
+    renderCatChips(); renderShiftTable(); renderAllowedStops();
+    document.getElementById('addAllowedStopBtn').onclick = ()=>openAllowedStopForm(null);
 
     document.getElementById('saveCompanyBtn').onclick = ()=>{
       DB.settings.companyName = document.getElementById('setCompany').value.trim() || DB.settings.companyName;
@@ -1969,6 +2009,51 @@ PAGE_RENDERERS.settings = function(mount){
       obj.durasiMenit = parseFloat(fd.get('durasiMenit'))||0;
       if(!editing) DB.shiftMaster.push(obj);
       saveDB(); closeModal(); renderShiftTable(); toast('Shift disimpan.');
+    };
+  }
+  function renderAllowedStops(){
+    const list = DB.settings.allowedStops || [];
+    document.getElementById('allowedStopBody').innerHTML = list.length ? list.map(s=>`
+      <tr>
+        <td>${escapeHtml(s.nama)}</td>
+        <td class="num">${fmtNum(s.durasiMenit,0)}</td>
+        <td><span class="pill ${s.aktif!==false?'good':''}">${s.aktif!==false?'Aktif':'Nonaktif'}</span></td>
+        <td><div class="row-actions">
+          <button class="icon-btn" data-eas="${s.id}" title="Edit">✎</button>
+          <button class="icon-btn del" data-das="${s.id}" title="Hapus">🗑</button>
+        </div></td>
+      </tr>`).join('') : `<tr class="empty-row"><td colspan="4">Belum ada waktu stop yang diizinkan.</td></tr>`;
+    document.getElementById('allowedStopTotal').textContent = 'Total aktif: '+fmtNum(totalAllowedStopMinutes(),0)+' menit/shift';
+    document.querySelectorAll('[data-eas]').forEach(b=>b.onclick=()=>openAllowedStopForm(b.dataset.eas));
+    document.querySelectorAll('[data-das]').forEach(b=>b.onclick=()=>{
+      if(!confirm('Hapus waktu stop ini?')) return;
+      DB.settings.allowedStops = DB.settings.allowedStops.filter(x=>x.id!==b.dataset.das);
+      saveDB(); renderAllowedStops(); toast('Dihapus.');
+    });
+  }
+  function openAllowedStopForm(id){
+    const editing = !!id;
+    const row = editing ? DB.settings.allowedStops.find(x=>x.id===id) : {aktif:true};
+    openModal((editing?'Edit ':'Tambah ')+'Waktu Stop yang Diizinkan', `
+      <form id="asForm">
+        <div class="form-grid">
+          <div class="field full"><label>Nama *</label><input name="nama" value="${escapeHtml(row.nama||'')}" required placeholder="mis. Istirahat / Sholat"></div>
+          <div class="field"><label>Durasi (menit) *</label><input type="number" name="durasiMenit" value="${row.durasiMenit??0}" required></div>
+          <div class="field"><label>Status</label><select name="aktif"><option value="true" ${row.aktif!==false?'selected':''}>Aktif</option><option value="false" ${row.aktif===false?'selected':''}>Nonaktif</option></select></div>
+        </div>
+        <p style="font-size:12px;color:var(--ink-200);margin-top:6px;">Berlaku untuk semua mesin dan semua produk — tidak perlu dipilih per item.</p>
+        <div class="form-actions"><button type="button" class="btn btn-ghost" id="cancelAsBtn">Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
+      </form>`);
+    document.getElementById('cancelAsBtn').onclick = closeModal;
+    document.getElementById('asForm').onsubmit = (e)=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const obj = editing ? row : {id:uid()};
+      obj.nama = fd.get('nama');
+      obj.durasiMenit = parseFloat(fd.get('durasiMenit'))||0;
+      obj.aktif = fd.get('aktif')==='true';
+      if(!editing) DB.settings.allowedStops.push(obj);
+      saveDB(); closeModal(); renderAllowedStops(); toast('Waktu stop disimpan.');
     };
   }
   draw();
