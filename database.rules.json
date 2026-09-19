@@ -1,0 +1,41 @@
+{
+  "rules": {
+    "users": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && ( (!data.exists() && !root.child('users').exists()) || root.child('users').child(auth.uid).child('role').val() === 'manager' )",
+        ".validate": "newData.hasChildren(['nama','role'])",
+        "role": { ".validate": "newData.val() === 'staff' || newData.val() === 'supervisor' || newData.val() === 'manager' || newData.val() === 'direksi'" },
+        "nama": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length < 120" },
+        "email": { ".validate": "newData.isString()" },
+        "area": { ".validate": "newData.isString()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    "data": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()",
+
+      "oeeInput": {
+        ".write": "root.child('users').child(auth.uid).child('role').val() === 'staff' || root.child('users').child(auth.uid).child('role').val() === 'supervisor' || root.child('users').child(auth.uid).child('role').val() === 'manager'"
+      },
+      "downtime": {
+        ".write": "root.child('users').child(auth.uid).child('role').val() === 'staff' || root.child('users').child(auth.uid).child('role').val() === 'supervisor' || root.child('users').child(auth.uid).child('role').val() === 'manager'"
+      },
+      "operator": {
+        ".write": "root.child('users').child(auth.uid).child('role').val() === 'supervisor' || root.child('users').child(auth.uid).child('role').val() === 'manager'"
+      },
+
+      "produk":      { ".write": "root.child('users').child(auth.uid).child('role').val() === 'manager'" },
+      "mesin":       { ".write": "root.child('users').child(auth.uid).child('role').val() === 'manager'" },
+      "kapasitas":   { ".write": "root.child('users').child(auth.uid).child('role').val() === 'manager'" },
+      "shiftMaster": { ".write": "root.child('users').child(auth.uid).child('role').val() === 'manager'" },
+      "settings":    { ".write": "root.child('users').child(auth.uid).child('role').val() === 'manager'" },
+
+      ".write": "auth != null && !root.child('data').exists()",
+      "$other": { ".validate": false }
+    },
+
+    "$other": { ".read": false, ".write": false }
+  }
+}

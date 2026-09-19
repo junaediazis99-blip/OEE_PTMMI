@@ -1,0 +1,2158 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OEE MMI — Lean Manufacturing Monitor</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚙️</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<!-- Firebase SDK (compat build) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<!-- Konfigurasi Firebase Anda (edit file ini, bukan index.html) -->
+<script src="firebase-config.js"></script>
+<style>
+:root{
+  /* Permukaan — dari kanvas paling belakang ke elemen paling menonjol */
+  --ink-950:#f4f3fa;   /* latar halaman */
+  --ink-900:#ffffff;   /* kartu, sidebar, topbar */
+  --ink-850:#f2f0fb;   /* isian input, baris hover */
+  --ink-800:#e8e5f5;   /* garis lembut, track bar */
+  --ink-700:#dcd8ee;   /* garis tepi */
+  --ink-600:#c3bde0;   /* garis tegas */
+  --ink-400:#817ca0;   /* teks paling redup */
+  --ink-200:#585373;   /* teks sekunder */
+  --paper:#241f3d;     /* teks utama */
+  --paper-dim:#3c3660;
+  --brass:#6a55c4;     /* aksen utama — violet parfum */
+  --brass-bright:#8168dd;
+  --brass-dim:#4c3b96;
+  --teal:#2f8f89;
+  --teal-bright:#3aa89f;
+  --good:#3d8f63;
+  --warn:#c08a22;
+  --bad:#c4503f;
+  --shadow-s:0 1px 2px rgba(36,31,61,.05), 0 2px 8px rgba(36,31,61,.04);
+  --shadow-m:0 2px 6px rgba(36,31,61,.06), 0 10px 26px rgba(36,31,61,.07);
+  --shadow-l:0 18px 50px rgba(36,31,61,.16);
+  --ease:cubic-bezier(.22,.8,.3,1);
+  --radius-s:4px;
+  --radius-m:8px;
+  --radius-l:14px;
+  --font-display:'Space Grotesk', 'IBM Plex Sans', sans-serif;
+  --font-ui:'IBM Plex Sans', sans-serif;
+  --font-mono:'IBM Plex Mono', monospace;
+}
+:root:not([data-theme="light"]){ color-scheme: dark; }
+*{box-sizing:border-box; margin:0; padding:0;}
+html,body{height:100%;}
+body{
+  font-family:var(--font-ui);
+  background:var(--ink-950);
+  color:var(--paper);
+  -webkit-font-smoothing:antialiased;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  overflow-x:hidden;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px);}
+::selection{background:var(--brass); color:var(--ink-950);}
+a{color:inherit;}
+button{font-family:inherit; cursor:pointer;}
+input,select,textarea{font-family:inherit;}
+
+/* ---------- scrollbar ---------- */
+::-webkit-scrollbar{width:10px; height:10px;}
+::-webkit-scrollbar-track{background:var(--ink-900);}
+::-webkit-scrollbar-thumb{background:var(--ink-600); border-radius:8px;}
+
+/* =====================================================
+   LOGIN SCREEN
+===================================================== */
+#loginScreen{
+  position:fixed; inset:0;
+  display:flex; align-items:stretch;
+  background:var(--ink-950);
+  z-index:50;
+}
+.login-visual{
+  position:relative;
+  flex:1.3;
+  overflow:hidden;
+  background:linear-gradient(170deg,#efeafb 0%, #e6f1f0 55%, #f6f4fc 100%);
+  display:flex; align-items:flex-end;
+}
+.login-visual svg{width:100%; height:100%; display:block;}
+.login-visual .visual-caption{
+  position:absolute; left:40px; bottom:36px; right:40px;
+  font-family:var(--font-mono);
+  color:var(--ink-400);
+  font-size:12px; letter-spacing:.02em;
+  display:flex; justify-content:space-between; gap:12px;
+  border-top:1px solid var(--ink-700);
+  padding-top:12px;
+}
+.login-visual .brand-mark{
+  position:absolute; top:40px; left:40px;
+  font-family:var(--font-display); font-weight:700; font-size:22px;
+  letter-spacing:.01em; color:var(--paper);
+  display:flex; align-items:center; gap:10px;
+}
+.login-visual .brand-mark .dot{width:9px; height:9px; border-radius:50%; background:var(--brass-bright); box-shadow:0 0 0 4px rgba(129,104,221,.18);}
+.login-pane{
+  width:460px; max-width:92vw;
+  background:var(--ink-900);
+  display:flex; flex-direction:column; justify-content:center;
+  padding:56px 48px;
+  border-left:1px solid var(--ink-700);
+  position:relative; z-index:2;
+}
+.login-pane h1{
+  font-family:var(--font-display); font-size:28px; font-weight:600;
+  line-height:1.2; margin-bottom:6px;
+}
+.login-pane .sub{color:var(--ink-200); font-size:14px; margin-bottom:36px;}
+.field{margin-bottom:18px;}
+.field label{display:block; font-size:12px; color:var(--ink-200); margin-bottom:6px; font-family:var(--font-mono);}
+.field input, .field select{
+  width:100%; background:var(--ink-850); border:1px solid var(--ink-700);
+  color:var(--paper); padding:11px 13px; border-radius:var(--radius-s);
+  font-size:14.5px; transition:border-color .15s;
+}
+.field input:focus, .field select:focus{outline:none; border-color:var(--brass);}
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  border:none; border-radius:var(--radius-s); padding:11px 18px;
+  font-size:14px; font-weight:600; transition:filter .15s, transform .1s;
+}
+.btn:active{transform:translateY(1px);}
+.btn-primary{background:var(--brass); color:var(--ink-950);}
+.btn-primary:hover{filter:brightness(1.1);}
+.btn-ghost{background:transparent; color:var(--paper); border:1px solid var(--ink-600);}
+.btn-ghost:hover{border-color:var(--brass);}
+.btn-danger{background:var(--bad); color:var(--paper);}
+.btn-block{width:100%;}
+.btn-sm{padding:6px 11px; font-size:12.5px;}
+.login-error{
+  background:#fdeeeb; border:1px solid #efb9af; color:#9c3a2c;
+  font-size:13px; padding:9px 12px; border-radius:var(--radius-s); margin-bottom:16px; display:none;
+}
+.login-foot{
+  margin-top:26px; padding-top:20px; border-top:1px solid var(--ink-700);
+  display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+}
+.login-foot a{font-size:12.5px; color:var(--ink-200); text-decoration:none;}
+.login-foot a:hover{color:var(--brass-bright);}
+.conn-badge{
+  font-family:var(--font-mono); font-size:11px; padding:3px 10px; border-radius:20px;
+  border:1px solid var(--ink-600); color:var(--ink-400); white-space:nowrap;
+}
+.conn-badge.online{border-color:var(--good); color:var(--good);}
+.conn-badge.offline{border-color:var(--bad); color:var(--bad);}
+.conn-badge.connecting{border-color:var(--warn); color:var(--warn);}
+.conn-badge.local{border-color:var(--ink-600); color:var(--ink-400);}
+.login-error b{color:#fff;}
+
+@media (max-width:820px){
+  #loginScreen{flex-direction:column;}
+  .login-visual{flex:none; height:34vh; min-height:200px;}
+  .login-pane{width:100%; max-width:none; border-left:none; border-top:1px solid var(--ink-700); padding:32px 24px 40px;}
+}
+
+/* =====================================================
+   APP SHELL
+===================================================== */
+#app{display:none; min-height:100vh; min-height:100dvh;}
+#app.active{display:flex;}
+
+.sidebar{
+  width:238px; flex-shrink:0; background:var(--ink-900);
+  border-right:1px solid var(--ink-800);
+  display:flex; flex-direction:column;
+  position:fixed; top:0; bottom:0; left:0; z-index:40;
+  padding-top:env(safe-area-inset-top,0px);
+  transition:transform .22s ease;
+}
+.sidebar-brand{
+  padding:22px 20px 16px; display:flex; align-items:center; gap:10px;
+  border-bottom:1px solid var(--ink-800);
+}
+.sidebar-brand .dot{width:9px; height:9px; border-radius:50%; background:var(--brass-bright); box-shadow:0 0 0 4px rgba(129,104,221,.18); flex-shrink:0;}
+.sidebar-brand .txt{font-family:var(--font-display); font-weight:700; font-size:16px; line-height:1.15;}
+.sidebar-brand .txt small{display:block; font-family:var(--font-mono); font-weight:400; font-size:10.5px; color:var(--ink-400); letter-spacing:.03em; margin-top:2px;}
+.sidebar-nav{flex:1; overflow-y:auto; padding:14px 10px;}
+.nav-group{margin-bottom:4px;}
+.nav-label{font-family:var(--font-mono); font-size:10px; color:var(--ink-400); letter-spacing:.06em; padding:14px 10px 6px;}
+.nav-item{
+  display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:var(--radius-s);
+  color:var(--ink-200); font-size:13.5px; font-weight:500; margin-bottom:2px; position:relative;
+}
+.nav-item .ic{width:17px; text-align:center; flex-shrink:0; font-size:14px;}
+.nav-item:hover{background:var(--ink-850); color:var(--paper);}
+.nav-item.active{background:var(--ink-800); color:var(--brass-bright);}
+.nav-item.active::before{content:''; position:absolute; left:-10px; top:0; bottom:0; width:3px; background:var(--brass-bright); border-radius:0 3px 3px 0;}
+.sidebar-foot{padding:14px 16px; border-bottom:env(safe-area-inset-bottom,0px) solid transparent; border-top:1px solid var(--ink-800);}
+.user-chip{display:flex; align-items:center; gap:10px; margin-bottom:10px;}
+.user-ava{width:34px; height:34px; border-radius:50%; background:var(--teal); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; font-size:14px; flex-shrink:0;}
+.user-meta{overflow:hidden;}
+.user-meta .nm{font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.user-meta .rl{font-size:11px; color:var(--ink-400); font-family:var(--font-mono);}
+
+.sidebar-overlay{display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:39;}
+.sidebar-overlay.show{display:block;}
+
+.main-wrap{flex:1; margin-left:238px; display:flex; flex-direction:column; min-width:0;}
+.topbar{
+  height:60px; flex-shrink:0; display:flex; align-items:center; justify-content:space-between;
+  padding:0 22px; border-bottom:1px solid var(--ink-800); background:var(--ink-950);
+  position:sticky; top:0; z-index:30;
+  padding-top:env(safe-area-inset-top,0px);
+}
+.topbar-left{display:flex; align-items:center; gap:14px;}
+.burger{display:none; background:none; border:none; color:var(--paper); font-size:20px; padding:4px;}
+.page-title{font-family:var(--font-display); font-weight:600; font-size:17px;}
+.page-crumb{font-family:var(--font-mono); font-size:11px; color:var(--ink-400);}
+.topbar-right{display:flex; align-items:center; gap:14px;}
+.role-badge{
+  font-family:var(--font-mono); font-size:11px; padding:4px 10px; border-radius:20px;
+  border:1px solid var(--ink-600); color:var(--ink-200);
+}
+.role-badge.role-direksi{border-color:var(--brass); color:var(--brass-bright);}
+.role-badge.role-manager{border-color:var(--teal); color:var(--teal-bright);}
+
+.main-content{flex:1; padding:22px; max-width:1400px; width:100%; margin:0 auto;}
+@media (max-width:980px){
+  .sidebar{transform:translateX(-100%);}
+  .sidebar.open{transform:translateX(0);}
+  .main-wrap{margin-left:0;}
+  .burger{display:block;}
+}
+
+/* ---------- generic components ---------- */
+.card{background:var(--ink-900); border:1px solid var(--ink-800); border-radius:var(--radius-m); padding:18px;}
+.card-title{font-family:var(--font-display); font-weight:600; font-size:14.5px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; gap:10px;}
+.card-title .hint{font-family:var(--font-mono); font-size:10.5px; color:var(--ink-400); font-weight:400;}
+
+.kpi-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:18px;}
+.kpi-card{background:var(--ink-900); border:1px solid var(--ink-800); border-radius:var(--radius-m); padding:15px 16px; position:relative; overflow:hidden;}
+.kpi-card .kv{font-family:var(--font-mono); font-weight:600; font-size:26px; line-height:1;}
+.kpi-card .kl{font-size:11.5px; color:var(--ink-200); margin-top:8px;}
+.kpi-card .kd{font-size:11px; font-family:var(--font-mono); margin-top:6px;}
+.kpi-card .bar{position:absolute; left:0; bottom:0; height:3px; background:var(--brass);}
+.kpi-good .kv{color:var(--good);} .kpi-good .bar{background:var(--good);}
+.kpi-warn .kv{color:var(--warn);} .kpi-warn .bar{background:var(--warn);}
+.kpi-bad .kv{color:var(--bad);} .kpi-bad .bar{background:var(--bad);}
+.kpi-brass .kv{color:var(--brass-bright);}
+
+.grid-2{display:grid; grid-template-columns:1.4fr 1fr; gap:16px;}
+.grid-3{display:grid; grid-template-columns:repeat(3,1fr); gap:16px;}
+@media (max-width:980px){.grid-2,.grid-3{grid-template-columns:1fr;}}
+
+.chart-box{position:relative; height:260px;}
+.chart-box.sm{height:200px;}
+
+.insight-list{display:flex; flex-direction:column; gap:10px;}
+.insight-item{
+  display:flex; gap:10px; padding:11px 12px; border-radius:var(--radius-s);
+  background:var(--ink-850); border-left:3px solid var(--teal);
+  font-size:12.8px; line-height:1.5; color:var(--ink-200);
+}
+.insight-item.warn{border-left-color:var(--warn);}
+.insight-item.bad{border-left-color:var(--bad);}
+.insight-item.good{border-left-color:var(--good);}
+.insight-item b{color:var(--paper);}
+.insight-item .ic{font-size:15px; flex-shrink:0;}
+
+.toolbar{display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; margin-bottom:16px;}
+.toolbar-left{display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
+.search-input{background:var(--ink-850); border:1px solid var(--ink-700); color:var(--paper); padding:8px 12px; border-radius:var(--radius-s); font-size:13px; min-width:180px;}
+.select-sm{background:var(--ink-850); border:1px solid var(--ink-700); color:var(--paper); padding:8px 10px; border-radius:var(--radius-s); font-size:12.5px;}
+
+.table-wrap{overflow-x:auto; border:1px solid var(--ink-800); border-radius:var(--radius-m);}
+table.data-table{width:100%; border-collapse:collapse; font-size:12.8px; white-space:nowrap;}
+table.data-table th{
+  background:var(--ink-850); text-align:left; padding:10px 13px; font-family:var(--font-mono);
+  font-size:10.8px; letter-spacing:.02em; color:var(--ink-200); border-bottom:1px solid var(--ink-700); position:sticky; top:0;
+}
+table.data-table td{padding:9px 13px; border-bottom:1px solid var(--ink-800); color:var(--paper);}
+table.data-table tbody tr:hover{background:var(--ink-850);}
+table.data-table td.num{font-family:var(--font-mono); text-align:right;}
+.row-actions{display:flex; gap:6px;}
+.icon-btn{background:var(--ink-800); border:1px solid var(--ink-700); color:var(--ink-200); border-radius:var(--radius-s); width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; font-size:13px;}
+.icon-btn:hover{border-color:var(--brass); color:var(--brass-bright);}
+.icon-btn.del:hover{border-color:var(--bad); color:var(--bad);}
+.empty-row td{text-align:center; color:var(--ink-400); padding:34px; font-family:var(--font-mono); font-size:12px;}
+
+.pill{display:inline-flex; align-items:center; gap:5px; font-family:var(--font-mono); font-size:11px; padding:3px 9px; border-radius:20px; border:1px solid var(--ink-600); color:var(--ink-200);}
+.pill.good{border-color:var(--good); color:var(--good);}
+.pill.warn{border-color:var(--warn); color:var(--warn);}
+.pill.bad{border-color:var(--bad); color:var(--bad);}
+
+/* modal */
+.modal-overlay{position:fixed; inset:0; background:rgba(36,31,61,.28); backdrop-filter:blur(3px); z-index:60; display:none; align-items:flex-start; justify-content:center; overflow-y:auto; padding:5vh 16px;}
+.modal-overlay.show{display:flex;}
+.modal-box{background:var(--ink-900); border:1px solid var(--ink-700); border-radius:var(--radius-l); width:520px; max-width:100%; padding:24px; margin:auto;}
+.modal-box.wide{width:720px;}
+.modal-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;}
+.modal-head h3{font-family:var(--font-display); font-size:17px; font-weight:600;}
+.modal-close{background:none; border:none; color:var(--ink-400); font-size:20px; line-height:1;}
+.modal-close:hover{color:var(--paper);}
+.form-grid{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+.form-grid .full{grid-column:1/-1;}
+@media (max-width:560px){.form-grid{grid-template-columns:1fr;}}
+.form-actions{display:flex; justify-content:flex-end; gap:10px; margin-top:20px; padding-top:16px; border-top:1px solid var(--ink-800);}
+
+.toast-wrap{position:fixed; bottom:20px; right:20px; z-index:80; display:flex; flex-direction:column; gap:8px;}
+.toast{background:var(--ink-800); border:1px solid var(--ink-600); border-left:3px solid var(--good); padding:11px 16px; border-radius:var(--radius-s); font-size:13px; min-width:220px; box-shadow:0 8px 24px rgba(0,0,0,.35); animation:toastIn .18s ease;}
+.toast.err{border-left-color:var(--bad);}
+@keyframes toastIn{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;}}
+
+.gauge-wrap{display:flex; align-items:center; justify-content:center; gap:22px; flex-wrap:wrap;}
+.gauge{position:relative; width:150px; height:150px;}
+.gauge svg{transform:rotate(-90deg);}
+.gauge .gval{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;}
+.gauge .gval b{font-family:var(--font-mono); font-size:26px;}
+.gauge .gval span{font-size:10px; color:var(--ink-200); font-family:var(--font-mono); margin-top:2px;}
+.apq-mini{display:flex; flex-direction:column; gap:10px; min-width:150px;}
+.apq-row{display:flex; align-items:center; gap:8px;}
+.apq-row .lb{width:64px; font-size:11.5px; color:var(--ink-200); font-family:var(--font-mono);}
+.apq-row .track{flex:1; height:7px; background:var(--ink-800); border-radius:6px; overflow:hidden;}
+.apq-row .fill{height:100%; border-radius:6px;}
+.apq-row .vv{width:44px; text-align:right; font-family:var(--font-mono); font-size:12px;}
+
+.empty-state{text-align:center; padding:60px 20px; color:var(--ink-400);}
+.empty-state .ic{font-size:34px; margin-bottom:10px;}
+.empty-state p{font-size:13px; font-family:var(--font-mono);}
+
+.tabs{display:flex; gap:4px; border-bottom:1px solid var(--ink-800); margin-bottom:18px; overflow-x:auto;}
+.tab-btn{background:none; border:none; color:var(--ink-200); padding:10px 16px; font-size:13px; font-weight:500; border-bottom:2px solid transparent; white-space:nowrap;}
+.tab-btn.active{color:var(--brass-bright); border-color:var(--brass-bright);}
+
+.settings-block{margin-bottom:26px;}
+.settings-block h4{font-family:var(--font-display); font-size:14px; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;}
+.chip-row{display:flex; flex-wrap:wrap; gap:8px;}
+.chip{background:var(--ink-850); border:1px solid var(--ink-700); border-radius:20px; padding:6px 10px 6px 13px; font-size:12px; display:flex; align-items:center; gap:8px;}
+.chip button{background:none; border:none; color:var(--ink-400); font-size:13px;}
+.chip button:hover{color:var(--bad);}
+
+/* print */
+#printArea{display:none;}
+@media print{
+  body *{visibility:hidden;}
+  #printArea, #printArea *{visibility:visible;}
+  #printArea{display:block; position:absolute; top:0; left:0; width:100%; padding:20px; color:#111; background:#fff;}
+  #printArea .p-head{display:flex; justify-content:space-between; border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:16px;}
+  #printArea table{width:100%; border-collapse:collapse; font-size:11px;}
+  #printArea th,#printArea td{border:1px solid #999; padding:6px 8px; text-align:left;}
+  #printArea .sig-row{display:flex; justify-content:space-between; margin-top:60px;}
+  #printArea .sig-box{width:30%; text-align:center; font-size:11px;}
+  #printArea .sig-line{border-top:1px solid #111; margin-top:50px; padding-top:6px;}
+}
+
+/* =====================================================
+   TEMA TERANG — penyesuaian kontras & bayangan
+===================================================== */
+body{background:
+  radial-gradient(1100px 520px at 12% -8%, #ece7fb 0%, rgba(236,231,251,0) 62%),
+  radial-gradient(900px 480px at 92% 4%, #e3f1ef 0%, rgba(227,241,239,0) 58%),
+  var(--ink-950);
+  background-attachment:fixed;}
+.card, .kpi-card{box-shadow:var(--shadow-s);}
+.sidebar{box-shadow:1px 0 0 var(--ink-800);}
+.topbar{background:rgba(255,255,255,.82); backdrop-filter:saturate(1.4) blur(10px); border-bottom:1px solid var(--ink-800);}
+.login-pane{box-shadow:var(--shadow-m);}
+.modal-box{box-shadow:var(--shadow-l);}
+.toast{background:#fff; box-shadow:var(--shadow-m);}
+.user-ava{color:#fff;}
+.btn-primary{color:#fff; box-shadow:0 2px 8px rgba(106,85,196,.28);}
+.btn-danger{color:#fff;}
+::selection{background:rgba(129,104,221,.26); color:var(--paper);}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--ink-600); border:2px solid var(--ink-950); border-radius:8px;}
+table.data-table th{backdrop-filter:none;}
+.nav-item.active{background:linear-gradient(90deg, rgba(106,85,196,.14), rgba(106,85,196,.04)); color:var(--brass-dim);}
+.nav-item.active .ic{color:var(--brass);}
+.insight-item{background:#faf9fe;}
+.kpi-card .kv{letter-spacing:-.01em;}
+.qtitle, .page-crumb{color:var(--ink-400);}
+.chip{background:#faf9fe;}
+
+/* =====================================================
+   TRANSISI & ANIMASI
+===================================================== */
+@keyframes riseIn{from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:none;}}
+@keyframes fadeIn{from{opacity:0;} to{opacity:1;}}
+@keyframes popIn{from{opacity:0; transform:translateY(12px) scale(.985);} to{opacity:1; transform:none;}}
+@keyframes sheen{from{background-position:-160% 0;} to{background-position:260% 0;}}
+
+/* isi halaman masuk bertahap setiap kali berpindah menu */
+#mainContent > *{animation:riseIn .38s var(--ease) both;}
+#mainContent > *:nth-child(1){animation-delay:.02s;}
+#mainContent > *:nth-child(2){animation-delay:.07s;}
+#mainContent > *:nth-child(3){animation-delay:.12s;}
+#mainContent > *:nth-child(4){animation-delay:.17s;}
+#mainContent > *:nth-child(5){animation-delay:.22s;}
+#mainContent > *:nth-child(n+6){animation-delay:.26s;}
+.kpi-grid .kpi-card{animation:riseIn .42s var(--ease) both;}
+.kpi-grid .kpi-card:nth-child(2){animation-delay:.05s;}
+.kpi-grid .kpi-card:nth-child(3){animation-delay:.1s;}
+.kpi-grid .kpi-card:nth-child(4){animation-delay:.15s;}
+.kpi-grid .kpi-card:nth-child(5){animation-delay:.2s;}
+.kpi-grid .kpi-card:nth-child(6){animation-delay:.25s;}
+
+.card, .kpi-card{transition:box-shadow .28s var(--ease), transform .28s var(--ease), border-color .28s var(--ease);}
+.kpi-card:hover{transform:translateY(-3px); box-shadow:var(--shadow-m);}
+.kpi-card .bar{transition:width .7s var(--ease);}
+.apq-row .fill{transition:width .7s var(--ease);}
+.gauge circle{transition:stroke-dashoffset .9s var(--ease), stroke .3s;}
+
+.nav-item{transition:background .22s var(--ease), color .22s var(--ease), padding-left .22s var(--ease);}
+.nav-item:hover{padding-left:16px;}
+.nav-item::before{transition:transform .26s var(--ease); transform:scaleY(0); transform-origin:center;}
+.nav-item.active::before{transform:scaleY(1);}
+.sidebar-overlay{animation:fadeIn .2s ease;}
+
+.btn{transition:filter .18s var(--ease), transform .12s var(--ease), box-shadow .22s var(--ease), border-color .22s var(--ease);}
+.btn-primary:hover{transform:translateY(-1px); box-shadow:0 6px 16px rgba(106,85,196,.3);}
+.icon-btn{transition:border-color .2s, color .2s, background .2s, transform .16s var(--ease);}
+.icon-btn:hover{transform:translateY(-1px); background:#fff;}
+.field input, .field select, .search-input, .select-sm{transition:border-color .2s, box-shadow .2s, background .2s;}
+.field input:focus, .field select:focus, .search-input:focus, .select-sm:focus{
+  outline:none; border-color:var(--brass); background:#fff; box-shadow:0 0 0 3px rgba(106,85,196,.14);}
+.tab-btn{transition:color .2s, border-color .2s;}
+
+table.data-table tbody tr{transition:background .18s ease;}
+table.data-table tbody tr{animation:fadeIn .3s ease both;}
+.insight-item{animation:riseIn .4s var(--ease) both;}
+.insight-item:nth-child(2){animation-delay:.06s;}
+.insight-item:nth-child(3){animation-delay:.12s;}
+.insight-item:nth-child(4){animation-delay:.18s;}
+.insight-item:nth-child(5){animation-delay:.24s;}
+.insight-item:nth-child(n+6){animation-delay:.3s;}
+
+.modal-overlay{animation:fadeIn .18s ease;}
+.modal-overlay .modal-box{animation:popIn .3s var(--ease) both;}
+.login-pane{animation:riseIn .5s var(--ease) both;}
+.login-visual .brand-mark{animation:fadeIn .7s ease both;}
+.pill{transition:border-color .2s, color .2s;}
+.conn-badge{transition:color .3s, border-color .3s;}
+
+/* baris pemuatan halus saat data sedang diambil */
+.empty-state .ic{animation:fadeIn 1.4s ease-in-out infinite alternate;}
+
+@media (prefers-reduced-motion: reduce){
+  *, *::before, *::after{animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important;}
+  .nav-item:hover{padding-left:12px;}
+}
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN SCREEN ============ -->
+<div id="loginScreen">
+  <div class="login-visual">
+    <div class="brand-mark"><span class="dot"></span>MMI · OEE MONITOR</div>
+    <svg id="loginSvg" viewBox="0 0 900 700" preserveAspectRatio="xMidYMax slice" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div class="visual-caption">
+      <span>LINE FILLING — PARFUM DIVISION</span>
+      <span id="clockCaption">--:--:--</span>
+    </div>
+  </div>
+  <div class="login-pane">
+    <h1>Masuk ke OEE Monitor</h1>
+    <div class="sub">PT MMI — Lean Manufacturing Dashboard</div>
+    <div class="login-error" id="loginError"></div>
+    <form id="loginForm" autocomplete="off">
+      <div class="field">
+        <label>EMAIL</label>
+        <input type="email" id="loginUser" placeholder="nama@mmi.co.id" required autocomplete="username">
+      </div>
+      <div class="field">
+        <label>PASSWORD</label>
+        <input type="password" id="loginPass" placeholder="••••••••" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn btn-primary btn-block">Masuk</button>
+    </form>
+    <div class="login-foot">
+      <a href="#" id="resetPassLink">Lupa password?</a>
+      <span class="conn-badge connecting" id="loginConn">● Menghubungkan…</span>
+    </div>
+  </div>
+</div>
+
+<div id="app"></div>
+
+<script>
+/* =====================================================
+   OEE MMI — CORE (state, db, auth, utils)
+===================================================== */
+const CACHE_KEY = 'oee_mmi_cache_v2';   // cache lokal (offline fallback)
+const DATA_PATH = 'data';               // node data aplikasi di Realtime Database
+const USERS_PATH = 'users';             // node profil & role user (key = UID Firebase Auth)
+
+let fbApp=null, fbAuth=null, fbDb=null, FB_READY=false;
+function initFirebase(){
+  if(typeof firebase==='undefined' || typeof FIREBASE_CONFIG==='undefined'){
+    console.warn('Firebase SDK / konfigurasi belum tersedia — aplikasi berjalan mode lokal.');
+    return false;
+  }
+  if(!FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey.indexOf('GANTI')===0){
+    console.warn('firebase-config.js belum diisi — aplikasi berjalan mode lokal.');
+    return false;
+  }
+  try{
+    fbApp = firebase.apps.length ? firebase.app() : firebase.initializeApp(FIREBASE_CONFIG);
+    fbAuth = firebase.auth();
+    fbDb = firebase.database();
+    FB_READY = true;
+    return true;
+  }catch(e){ console.error('Gagal inisialisasi Firebase:', e); return false; }
+}
+function setConnBadge(state, text){
+  const el = document.getElementById('connBadge');
+  if(el){ el.className = 'conn-badge '+state; el.textContent = text; }
+  const el2 = document.getElementById('loginConn');
+  if(el2){ el2.className = 'conn-badge '+state; el2.textContent = text; }
+}
+
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+function fmtNum(n,d=1){ if(n===null||n===undefined||isNaN(n)) return '–'; return Number(n).toLocaleString('id-ID',{minimumFractionDigits:d,maximumFractionDigits:d}); }
+function pct(n,d=1){ return fmtNum(n*100,d)+'%'; }
+function fmtDate(s){ if(!s) return '–'; const d=new Date(s+'T00:00:00'); return d.toLocaleDateString('id-ID',{day:'2-digit',month:'short',year:'numeric'}); }
+function clamp(n,a,b){ return Math.max(a,Math.min(b,n)); }
+function escapeHtml(s){ return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function seedData(){
+  const produk = [
+    {id:uid(), kode:'PF-EDT-050', nama:'Eau de Toilette Rose 50ml', volume:50, isiPerDus:24, kapasitasDusPerJam:14, kapasitasPcsPerJam:336},
+    {id:uid(), kode:'PF-EDP-100', nama:'Eau de Parfum Oud 100ml', volume:100, isiPerDus:12, kapasitasDusPerJam:9, kapasitasPcsPerJam:108},
+    {id:uid(), kode:'PF-BSC-030', nama:'Body Splash Citrus 30ml', volume:30, isiPerDus:36, kapasitasDusPerJam:20, kapasitasPcsPerJam:720},
+    {id:uid(), kode:'PF-EDT-075', nama:'Eau de Toilette Musk 75ml', volume:75, isiPerDus:18, kapasitasDusPerJam:11, kapasitasPcsPerJam:198},
+  ];
+  const mesin = [
+    {id:uid(), kode:'FL-01', nama:'Filling Line 1', area:'Filling', kapasitasStandar:340},
+    {id:uid(), kode:'FL-02', nama:'Filling Line 2', area:'Filling', kapasitasStandar:220},
+    {id:uid(), kode:'CAP-01', nama:'Capping & Labeling 1', area:'Packing', kapasitasStandar:400},
+    {id:uid(), kode:'PKG-01', nama:'Cartoning Line 1', area:'Packing', kapasitasStandar:150},
+  ];
+  const operator = [
+    {id:uid(), nik:'MMI-0231', nama:'Rudi Hartono', shift:'Shift 1', area:'Filling'},
+    {id:uid(), nik:'MMI-0244', nama:'Siti Amelia', shift:'Shift 2', area:'Filling'},
+    {id:uid(), nik:'MMI-0198', nama:'Budi Santoso', shift:'Shift 1', area:'Packing'},
+    {id:uid(), nik:'MMI-0267', nama:'Dewi Anggraini', shift:'Shift 3', area:'Packing'},
+  ];
+  const kapasitas = [
+    {id:uid(), produkId:produk[0].id, mesinId:mesin[0].id, kapasitasPcsPerJam:336},
+    {id:uid(), produkId:produk[1].id, mesinId:mesin[0].id, kapasitasPcsPerJam:180},
+    {id:uid(), produkId:produk[2].id, mesinId:mesin[1].id, kapasitasPcsPerJam:720},
+    {id:uid(), produkId:produk[3].id, mesinId:mesin[1].id, kapasitasPcsPerJam:198},
+  ];
+  const shiftMaster = [
+    {id:uid(), kode:'S1', nama:'Shift 1', jamMulai:'07:00', jamSelesai:'15:00', durasiMenit:480},
+    {id:uid(), kode:'S2', nama:'Shift 2', jamMulai:'15:00', jamSelesai:'23:00', durasiMenit:480},
+    {id:uid(), kode:'S3', nama:'Shift 3', jamMulai:'23:00', jamSelesai:'07:00', durasiMenit:480},
+  ];
+  const downtimeCategories = ['Setup / Changeover','Breakdown Mesin','Menunggu Material','Kualitas / Rework','Maintenance Terjadwal','Menunggu Operator','Lain-lain'];
+
+  // generate ~30 days of oeeInput + downtime demo history
+  const oeeInput = [];
+  const downtime = [];
+  const mesinIds = mesin.map(m=>m.id);
+  const produkIds = produk.map(p=>p.id);
+  const opIds = operator.map(o=>o.id);
+  for(let d=29; d>=0; d--){
+    const dt = new Date(); dt.setDate(dt.getDate()-d);
+    const ds = dt.toISOString().slice(0,10);
+    const numEntries = 2 + Math.floor(Math.random()*2);
+    for(let e=0;e<numEntries;e++){
+      const mesinId = mesinIds[Math.floor(Math.random()*mesinIds.length)];
+      const produkId = produkIds[Math.floor(Math.random()*produkIds.length)];
+      const cap = kapasitas.find(k=>k.mesinId===mesinId && k.produkId===produkId);
+      const idealRate = cap ? cap.kapasitasPcsPerJam : (produk.find(p=>p.id===produkId).kapasitasPcsPerJam);
+      const planned = 480;
+      const dtMenit = Math.round(20 + Math.random()*70);
+      const operating = planned - dtMenit;
+      const perfFactor = 0.78 + Math.random()*0.19;
+      const totalCount = Math.round((idealRate/60)*operating*perfFactor);
+      const rejectRate = 0.005 + Math.random()*0.035;
+      const rejectCount = Math.round(totalCount*rejectRate);
+      oeeInput.push({
+        id:uid(), tanggal:ds, shift: shiftMaster[e%3].nama, mesinId, produkId,
+        operatorId: opIds[Math.floor(Math.random()*opIds.length)],
+        plannedTimeMenit: planned, totalCount, rejectCount, downtimeMenit: dtMenit,
+        catatan:''
+      });
+      if(Math.random()<0.85){
+        downtime.push({
+          id:uid(), tanggal:ds, shift: shiftMaster[e%3].nama, mesinId,
+          mulai:'', selesai:'', durasiMenit: dtMenit,
+          kategori: downtimeCategories[Math.floor(Math.random()*downtimeCategories.length)],
+          keterangan:''
+        });
+      }
+    }
+  }
+
+  return {
+    users: [],
+    produk, mesin, operator, kapasitas, shiftMaster, oeeInput, downtime,
+    settings:{
+      companyName:'PT MMI — Maklon & Manufaktur Parfum',
+      downtimeCategories,
+      oeeTargets:{ oee:0.85, availability:0.9, performance:0.95, quality:0.99 },
+    }
+  };
+}
+
+let DB = null;
+let SESSION = null;
+const DATA_COLLS = ['produk','mesin','operator','kapasitas','shiftMaster','oeeInput','downtime','settings'];
+let _shadow = {};          // snapshot terakhir tiap koleksi -> dipakai menulis per-bagian saja
+let _suppressSync = false; // cegah re-render saat perubahan berasal dari tulisan kita sendiri
+
+function ensureShape(){
+  if(!DB) DB = {};
+  const seed = seedData();
+  DATA_COLLS.forEach(k=>{ if(!DB[k]) DB[k] = seed[k]; });
+  if(!DB.users) DB.users = [];
+  if(!DB.settings.downtimeCategories) DB.settings.downtimeCategories = seed.settings.downtimeCategories;
+  if(!DB.settings.oeeTargets) DB.settings.oeeTargets = seed.settings.oeeTargets;
+}
+function snapshotShadow(){
+  _shadow = {};
+  DATA_COLLS.forEach(k=>{ _shadow[k] = JSON.stringify(DB[k]); });
+}
+function cacheLocal(){
+  try{ localStorage.setItem(CACHE_KEY, JSON.stringify({data:DB, ts:Date.now()})); }catch(e){}
+}
+
+/* Memuat data: dari Firebase bila siap, kalau tidak dari cache lokal. */
+async function loadDB(){
+  if(FB_READY){
+    try{
+      const snap = await fbDb.ref(DATA_PATH).get();
+      if(snap.exists()){ DB = snap.val(); }
+      else{
+        DB = seedData();
+        await fbDb.ref(DATA_PATH).set(DB);   // inisialisasi pertama kali
+      }
+      ensureShape(); snapshotShadow(); cacheLocal();
+      attachRealtimeSync();
+      setConnBadge('online','● Online');
+      return;
+    }catch(e){
+      console.error('Gagal memuat data dari Firebase:', e);
+      setConnBadge('offline','● Offline (cache)');
+    }
+  }
+  try{
+    const raw = localStorage.getItem(CACHE_KEY);
+    DB = raw ? JSON.parse(raw).data : seedData();
+  }catch(e){ DB = seedData(); }
+  ensureShape(); snapshotShadow();
+  if(!FB_READY) setConnBadge('local','● Mode lokal');
+}
+
+/* Menyimpan: hanya koleksi yang benar-benar berubah yang ditulis (bukan seluruh tree). */
+function saveDB(){
+  ensureShape();
+  const changed = [];
+  DATA_COLLS.forEach(k=>{
+    const s = JSON.stringify(DB[k]);
+    if(_shadow[k] !== s){ _shadow[k] = s; changed.push(k); }
+  });
+  cacheLocal();
+  if(!FB_READY || !changed.length) return;
+  _suppressSync = true;
+  const updates = {};
+  changed.forEach(k=>{ updates[k] = DB[k]; });
+  fbDb.ref(DATA_PATH).update(updates)
+    .then(()=>{ setTimeout(()=>{ _suppressSync=false; }, 400); })
+    .catch(err=>{
+      _suppressSync = false;
+      console.error(err);
+      toast('Gagal menyimpan ke server: '+(err.message||'akses ditolak'), true);
+    });
+}
+
+/* Sinkronisasi realtime antar perangkat/pengguna. */
+function attachRealtimeSync(){
+  fbDb.ref(DATA_PATH).on('value', snap=>{
+    if(!snap.exists()) return;
+    if(_suppressSync) return;
+    const incoming = snap.val();
+    if(JSON.stringify(incoming) === JSON.stringify(stripUsers(DB))) return;
+    DB = Object.assign({users: DB && DB.users ? DB.users : []}, incoming);
+    ensureShape(); snapshotShadow(); cacheLocal();
+    if(SESSION && typeof CURRENT_PAGE !== 'undefined' && document.getElementById('mainContent')){
+      navigate(CURRENT_PAGE);
+      toast('Data diperbarui dari server.');
+    }
+  }, err=>{ console.error(err); setConnBadge('offline','● Offline'); });
+}
+function stripUsers(db){
+  if(!db) return {};
+  const c = Object.assign({}, db); delete c.users; return c;
+}
+
+/* Profil pengguna (role) disimpan terpisah di /users/{uid}. */
+async function loadUsers(){
+  if(!FB_READY){ return; }
+  try{
+    const snap = await fbDb.ref(USERS_PATH).get();
+    const val = snap.exists() ? snap.val() : {};
+    DB.users = Object.keys(val).map(k=>Object.assign({id:k, uid:k}, val[k]));
+  }catch(e){ console.warn('Tidak dapat membaca daftar pengguna:', e.message); }
+}
+async function saveUserProfile(uid2, profile){
+  if(!FB_READY) return;
+  await fbDb.ref(USERS_PATH+'/'+uid2).set(profile);
+}
+async function deleteUserProfile(uid2){
+  if(!FB_READY) return;
+  await fbDb.ref(USERS_PATH+'/'+uid2).remove();
+}
+
+const ROLE_LABEL = {staff:'Staff', supervisor:'Supervisor', manager:'Manager', direksi:'Direksi'};
+const ROLE_COLOR = {staff:'', supervisor:'', manager:'role-manager', direksi:'role-direksi'};
+
+// permission matrix per module: which roles can view / edit(crud) / manage(settings-level)
+const PERMS = {
+  dashboard:   {view:['staff','supervisor','manager','direksi']},
+  produk:      {view:['supervisor','manager','direksi'], edit:['manager']},
+  mesin:       {view:['supervisor','manager','direksi'], edit:['manager']},
+  operator:    {view:['supervisor','manager','direksi'], edit:['manager','supervisor']},
+  kapasitas:   {view:['supervisor','manager','direksi'], edit:['manager']},
+  oeeInput:    {view:['staff','supervisor','manager','direksi'], edit:['staff','supervisor','manager']},
+  downtime:    {view:['staff','supervisor','manager','direksi'], edit:['staff','supervisor','manager']},
+  laporan:     {view:['staff','supervisor','manager','direksi']},
+  settings:    {view:['manager'], edit:['manager']},
+  users:       {view:['manager'], edit:['manager']},
+};
+function can(mod, level='view'){
+  if(!SESSION) return false;
+  const p = PERMS[mod];
+  if(!p || !p[level]) return false;
+  return p[level].includes(SESSION.role);
+}
+
+/* =====================================================
+   OEE CALCULATION ENGINE
+===================================================== */
+function getIdealRate(produkId, mesinId){
+  const k = DB.kapasitas.find(x=>x.produkId===produkId && x.mesinId===mesinId);
+  if(k) return k.kapasitasPcsPerJam;
+  const p = DB.produk.find(x=>x.id===produkId);
+  return p ? p.kapasitasPcsPerJam : 0;
+}
+function calcOeeRow(row){
+  const planned = row.plannedTimeMenit || 0;
+  const downtimeMenit = row.downtimeMenit || 0;
+  const operating = Math.max(planned - downtimeMenit, 0);
+  const idealRate = getIdealRate(row.produkId, row.mesinId); // pcs/hour
+  const availability = planned>0 ? clamp(operating/planned,0,1) : 0;
+  let performance = 0;
+  if(operating>0 && idealRate>0){
+    const idealCycleMin = 1/idealRate; // hours per pcs -> convert below
+    // ideal time needed (in minutes) to produce totalCount at idealRate
+    const idealMinutesNeeded = (row.totalCount||0) / idealRate * 60;
+    performance = clamp(idealMinutesNeeded/operating,0,1.5>1?1:1); // cap at 100%
+    performance = clamp(idealMinutesNeeded/operating,0,1);
+  }
+  const totalCount = row.totalCount||0;
+  const rejectCount = row.rejectCount||0;
+  const goodCount = Math.max(totalCount-rejectCount,0);
+  const quality = totalCount>0 ? clamp(goodCount/totalCount,0,1) : 0;
+  const oee = availability*performance*quality;
+  return {availability, performance, quality, oee, operating, goodCount, idealRate};
+}
+function aggregateOee(rows){
+  if(!rows.length) return {availability:0,performance:0,quality:0,oee:0,totalCount:0,rejectCount:0,downtimeMenit:0,plannedTimeMenit:0,n:0};
+  let sA=0,sP=0,sQ=0,sO=0,totalCount=0,rejectCount=0,downtimeMenit=0,plannedTimeMenit=0;
+  rows.forEach(r=>{
+    const c = calcOeeRow(r);
+    sA+=c.availability; sP+=c.performance; sQ+=c.quality; sO+=c.oee;
+    totalCount+=r.totalCount||0; rejectCount+=r.rejectCount||0;
+    downtimeMenit+=r.downtimeMenit||0; plannedTimeMenit+=r.plannedTimeMenit||0;
+  });
+  const n = rows.length;
+  return {availability:sA/n, performance:sP/n, quality:sQ/n, oee:sO/n, totalCount, rejectCount, downtimeMenit, plannedTimeMenit, n};
+}
+function inDateRange(dateStr, from, to){
+  if(from && dateStr<from) return false;
+  if(to && dateStr>to) return false;
+  return true;
+}
+function filterOee({from,to,mesinId,produkId}={}){
+  return DB.oeeInput.filter(r=>{
+    if(from||to){ if(!inDateRange(r.tanggal, from, to)) return false; }
+    if(mesinId && r.mesinId!==mesinId) return false;
+    if(produkId && r.produkId!==produkId) return false;
+    return true;
+  });
+}
+function filterDowntime({from,to,mesinId}={}){
+  return DB.downtime.filter(r=>{
+    if(from||to){ if(!inDateRange(r.tanggal, from, to)) return false; }
+    if(mesinId && r.mesinId!==mesinId) return false;
+    return true;
+  });
+}
+function nameOf(coll, id, field='nama'){
+  const item = DB[coll].find(x=>x.id===id);
+  return item ? item[field] : '–';
+}
+function mesinName(id){ const m=DB.mesin.find(x=>x.id===id); return m? m.nama : '–'; }
+function produkName(id){ const p=DB.produk.find(x=>x.id===id); return p? p.nama : '–'; }
+function operatorName(id){ const o=DB.operator.find(x=>x.id===id); return o? o.nama : '–'; }
+
+function last30DaysRange(){
+  const to = todayStr();
+  const d = new Date(); d.setDate(d.getDate()-29);
+  const from = d.toISOString().slice(0,10);
+  return {from,to};
+}
+
+/* group rows by day/week/month for trend charts */
+function groupByPeriod(rows, mode){ // mode: 'day'|'week'|'month'
+  const map = {};
+  rows.forEach(r=>{
+    let key;
+    const d = new Date(r.tanggal+'T00:00:00');
+    if(mode==='day') key = r.tanggal;
+    else if(mode==='month') key = r.tanggal.slice(0,7);
+    else { // week: ISO week label
+      const onejan = new Date(d.getFullYear(),0,1);
+      const week = Math.ceil((((d-onejan)/86400000)+onejan.getDay()+1)/7);
+      key = d.getFullYear()+'-W'+String(week).padStart(2,'0');
+    }
+    if(!map[key]) map[key]=[];
+    map[key].push(r);
+  });
+  const keys = Object.keys(map).sort();
+  return keys.map(k=>({label:k, agg:aggregateOee(map[k])}));
+}
+
+/* =====================================================
+   AI INSIGHT (rule-based, generated from local data — no external API)
+===================================================== */
+function generateInsights({from,to}){
+  const rows = filterOee({from,to});
+  const insights = [];
+  if(rows.length===0){
+    insights.push({type:'warn', ic:'⚠️', html:'Belum ada data input OEE pada periode ini. Insight akan muncul setelah data shift diisi.'});
+    return insights;
+  }
+  const agg = aggregateOee(rows);
+  const targets = DB.settings.oeeTargets || {oee:0.85,availability:0.9,performance:0.95,quality:0.99};
+
+  // overall vs target
+  if(agg.oee < targets.oee){
+    insights.push({type:'bad', ic:'📉', html:`OEE rata-rata periode ini <b>${pct(agg.oee)}</b>, di bawah target <b>${pct(targets.oee)}</b>. Selisih ${pct(targets.oee-agg.oee)} perlu ditutup melalui perbaikan availability/performance/quality.`});
+  } else {
+    insights.push({type:'good', ic:'✅', html:`OEE rata-rata periode ini <b>${pct(agg.oee)}</b>, sudah mencapai atau melampaui target <b>${pct(targets.oee)}</b>.`});
+  }
+
+  // weakest of A/P/Q
+  const comp = [{k:'Availability',v:agg.availability,t:targets.availability},{k:'Performance',v:agg.performance,t:targets.performance},{k:'Quality',v:agg.quality,t:targets.quality}];
+  comp.sort((a,b)=>(a.v-a.t)-(b.v-b.t));
+  const weakest = comp[0];
+  if(weakest.v < weakest.t){
+    insights.push({type:'warn', ic:'🎯', html:`Komponen paling tertinggal adalah <b>${weakest.k}</b> (${pct(weakest.v)} vs target ${pct(weakest.t)}). Fokuskan perbaikan di sini untuk kenaikan OEE tercepat.`});
+  }
+
+  // per machine comparison
+  const byMesin = {};
+  rows.forEach(r=>{ (byMesin[r.mesinId] = byMesin[r.mesinId]||[]).push(r); });
+  const mesinAgg = Object.keys(byMesin).map(mid=>({mesinId:mid, agg:aggregateOee(byMesin[mid])})).sort((a,b)=>a.agg.oee-b.agg.oee);
+  if(mesinAgg.length>1){
+    const worst = mesinAgg[0], best = mesinAgg[mesinAgg.length-1];
+    insights.push({type:'warn', ic:'🏭', html:`Mesin dengan OEE terendah: <b>${mesinName(worst.mesinId)}</b> (${pct(worst.agg.oee)}), sedangkan tertinggi <b>${mesinName(best.mesinId)}</b> (${pct(best.agg.oee)}). Gap ${pct(best.agg.oee-worst.agg.oee)}.`});
+  }
+
+  // downtime pareto
+  const dt = filterDowntime({from,to});
+  if(dt.length){
+    const byCat = {};
+    dt.forEach(d=>{ byCat[d.kategori] = (byCat[d.kategori]||0) + (d.durasiMenit||0); });
+    const sorted = Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
+    const totalDt = sorted.reduce((s,x)=>s+x[1],0);
+    if(sorted.length){
+      const top = sorted[0];
+      insights.push({type:'bad', ic:'⏱️', html:`Penyebab downtime terbesar: <b>${escapeHtml(top[0])}</b>, menyumbang ${fmtNum(top[1],0)} menit (${pct(top[1]/totalDt)} dari total downtime tercatat).`});
+    }
+  }
+
+  // reject rate
+  const rejectRate = agg.totalCount>0 ? agg.rejectCount/agg.totalCount : 0;
+  if(rejectRate > 0.02){
+    insights.push({type:'bad', ic:'🚫', html:`Reject rate periode ini <b>${pct(rejectRate,2)}</b> (${fmtNum(agg.rejectCount,0)} pcs dari ${fmtNum(agg.totalCount,0)} pcs total produksi), tergolong tinggi dan menekan Quality.`});
+  } else {
+    insights.push({type:'good', ic:'👍', html:`Reject rate periode ini terjaga di <b>${pct(rejectRate,2)}</b>.`});
+  }
+
+  // trend vs previous period of equal length
+  const fromD = new Date(from+'T00:00:00'), toD = new Date(to+'T00:00:00');
+  const spanDays = Math.round((toD-fromD)/86400000)+1;
+  const prevTo = new Date(fromD); prevTo.setDate(prevTo.getDate()-1);
+  const prevFrom = new Date(prevTo); prevFrom.setDate(prevFrom.getDate()-(spanDays-1));
+  const prevRows = filterOee({from:prevFrom.toISOString().slice(0,10), to:prevTo.toISOString().slice(0,10)});
+  if(prevRows.length){
+    const prevAgg = aggregateOee(prevRows);
+    const delta = agg.oee - prevAgg.oee;
+    if(Math.abs(delta) >= 0.01){
+      insights.push({type: delta>0?'good':'bad', ic: delta>0?'📈':'📉', html:`OEE ${delta>0?'naik':'turun'} <b>${pct(Math.abs(delta))}</b> dibanding periode sebelumnya (${pct(prevAgg.oee)} → ${pct(agg.oee)}).`});
+    }
+  }
+
+  return insights;
+}
+
+/* =====================================================
+   TOASTS
+===================================================== */
+function toast(msg, isErr=false){
+  const wrap = document.getElementById('toastWrap');
+  const t = document.createElement('div');
+  t.className = 'toast'+(isErr?' err':'');
+  t.textContent = msg;
+  wrap.appendChild(t);
+  setTimeout(()=>{ t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(()=>t.remove(),300); }, 2600);
+}
+
+/* =====================================================
+   NAV DEFINITION
+===================================================== */
+const NAV = [
+  {group:'UTAMA', items:[
+    {key:'dashboard', label:'Dashboard', ic:'▣'},
+  ]},
+  {group:'INPUT PRODUKSI', items:[
+    {key:'oeeInput', label:'Input OEE', ic:'⏱'},
+    {key:'downtime', label:'Downtime', ic:'⛔'},
+  ]},
+  {group:'MASTER DATA', items:[
+    {key:'produk', label:'Produk Jadi', ic:'🧴'},
+    {key:'mesin', label:'Mesin', ic:'⚙'},
+    {key:'operator', label:'Operator', ic:'👤'},
+    {key:'kapasitas', label:'Kapasitas Produksi', ic:'📐'},
+  ]},
+  {group:'ANALISIS', items:[
+    {key:'laporan', label:'Laporan', ic:'📊'},
+  ]},
+  {group:'SISTEM', items:[
+    {key:'users', label:'Pengguna', ic:'🔑'},
+    {key:'settings', label:'Pengaturan', ic:'☰'},
+  ]},
+];
+const PAGE_TITLES = {
+  dashboard:'Dashboard', oeeInput:'Input OEE Harian', downtime:'Record Downtime',
+  produk:'Data Produk Jadi', mesin:'Data Mesin', operator:'Data Operator', kapasitas:'Kapasitas Produksi',
+  laporan:'Laporan OEE', users:'Manajemen Pengguna', settings:'Pengaturan Sistem'
+};
+
+let CURRENT_PAGE = 'dashboard';
+
+function renderShell(){
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <span class="dot"></span>
+        <div class="txt">MMI OEE<small>LEAN MANUFACTURING</small></div>
+      </div>
+      <nav class="sidebar-nav" id="sidebarNav"></nav>
+      <div class="sidebar-foot">
+        <div class="user-chip">
+          <div class="user-ava" id="userAva"></div>
+          <div class="user-meta">
+            <div class="nm" id="userName"></div>
+            <div class="rl" id="userRole"></div>
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-block btn-sm" id="btnLogout">Keluar</button>
+      </div>
+    </aside>
+    <div class="main-wrap">
+      <div class="topbar">
+        <div class="topbar-left">
+          <button class="burger" id="burgerBtn">☰</button>
+          <div>
+            <div class="page-title" id="pageTitle">Dashboard</div>
+            <div class="page-crumb" id="pageCrumb">OEE MMI / Dashboard</div>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <span class="conn-badge connecting" id="connBadge">● …</span>
+          <span class="role-badge" id="roleBadgeTop"></span>
+        </div>
+      </div>
+      <div class="main-content" id="mainContent"></div>
+    </div>
+    <div id="modalRoot"></div>
+    <div class="toast-wrap" id="toastWrap"></div>
+    <div id="printArea"></div>
+  `;
+  buildNav();
+  document.getElementById('userAva').textContent = (SESSION.nama||'?').charAt(0).toUpperCase();
+  document.getElementById('userName').textContent = SESSION.nama;
+  document.getElementById('userRole').textContent = ROLE_LABEL[SESSION.role];
+  const rb = document.getElementById('roleBadgeTop');
+  rb.textContent = ROLE_LABEL[SESSION.role];
+  rb.className = 'role-badge '+(ROLE_COLOR[SESSION.role]||'');
+  document.getElementById('btnLogout').onclick = doLogout;
+  document.getElementById('burgerBtn').onclick = ()=>{
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebarOverlay').classList.toggle('show');
+  };
+  document.getElementById('sidebarOverlay').onclick = ()=>{
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebarOverlay').classList.remove('show');
+  };
+  navigate('dashboard');
+}
+
+function buildNav(){
+  const nav = document.getElementById('sidebarNav');
+  let html = '';
+  NAV.forEach(group=>{
+    const visibleItems = group.items.filter(it=>can(it.key,'view'));
+    if(!visibleItems.length) return;
+    html += `<div class="nav-group"><div class="nav-label">${group.group}</div>`;
+    visibleItems.forEach(it=>{
+      html += `<a href="#" class="nav-item" data-page="${it.key}"><span class="ic">${it.ic}</span>${it.label}</a>`;
+    });
+    html += `</div>`;
+  });
+  nav.innerHTML = html;
+  nav.querySelectorAll('.nav-item').forEach(el=>{
+    el.onclick = (e)=>{ e.preventDefault(); navigate(el.dataset.page); };
+  });
+}
+
+const PAGE_RENDERERS = {}; // filled below by each module
+
+function navigate(page){
+  if(!can(page,'view')){ page='dashboard'; }
+  CURRENT_PAGE = page;
+  document.querySelectorAll('.nav-item').forEach(el=>el.classList.toggle('active', el.dataset.page===page));
+  document.getElementById('pageTitle').textContent = PAGE_TITLES[page]||page;
+  document.getElementById('pageCrumb').textContent = 'OEE MMI / '+(PAGE_TITLES[page]||page);
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('show');
+  const mount = document.getElementById('mainContent');
+  mount.innerHTML = '<div class="empty-state"><div class="ic">⏳</div><p>MEMUAT...</p></div>';
+  const fn = PAGE_RENDERERS[page];
+  if(fn) fn(mount); else mount.innerHTML = '<div class="empty-state"><p>Halaman tidak ditemukan.</p></div>';
+}
+
+/* =====================================================
+   MODAL HELPERS
+===================================================== */
+function openModal(title, bodyHtml, {wide=false}={}){
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+    <div class="modal-overlay show" id="modalOverlay">
+      <div class="modal-box ${wide?'wide':''}">
+        <div class="modal-head"><h3>${escapeHtml(title)}</h3><button class="modal-close" id="modalCloseBtn">✕</button></div>
+        <div id="modalBody">${bodyHtml}</div>
+      </div>
+    </div>`;
+  document.getElementById('modalCloseBtn').onclick = closeModal;
+  document.getElementById('modalOverlay').addEventListener('click', (e)=>{ if(e.target.id==='modalOverlay') closeModal(); });
+}
+function closeModal(){ document.getElementById('modalRoot').innerHTML=''; }
+
+/* =====================================================
+   GENERIC CRUD PAGE FACTORY
+   config = {
+     key, title, icon, columns:[{field,label,type,render?,width?}],
+     formFields:[{field,label,type,options?,required?,step?}],
+     searchFields:[...fields to search string on],
+     defaultSort
+   }
+===================================================== */
+function makeCrudPage(config){
+  return function(mount){
+    const canEdit = can(config.key,'edit');
+    let searchTerm = '';
+    function getRows(){
+      let rows = DB[config.key].slice();
+      if(config.sort) rows = config.sort(rows);
+      if(searchTerm){
+        const s = searchTerm.toLowerCase();
+        rows = rows.filter(r=> config.searchFields.some(f=> String(r[f]||'').toLowerCase().includes(s)));
+      }
+      return rows;
+    }
+    function renderTable(){
+      const rows = getRows();
+      const tbody = rows.length ? rows.map(r=>rowHtml(r)).join('') : `<tr class="empty-row"><td colspan="${config.columns.length+1}">Belum ada data. ${canEdit?'Klik "Tambah Data" untuk mulai.':''}</td></tr>`;
+      document.getElementById('crudTableBody').innerHTML = tbody;
+      document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openForm(b.dataset.edit));
+      document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>deleteRow(b.dataset.del));
+    }
+    function rowHtml(r){
+      const cells = config.columns.map(c=>{
+        const val = c.render ? c.render(r) : escapeHtml(r[c.field]??'–');
+        return `<td class="${c.num?'num':''}">${val}</td>`;
+      }).join('');
+      const actions = canEdit ? `<td><div class="row-actions">
+          <button class="icon-btn" data-edit="${r.id}" title="Edit">✎</button>
+          <button class="icon-btn del" data-del="${r.id}" title="Hapus">🗑</button>
+        </div></td>` : '<td></td>';
+      return `<tr>${cells}${actions}</tr>`;
+    }
+    function deleteRow(id){
+      if(!confirm('Hapus data ini? Tindakan tidak dapat dibatalkan.')) return;
+      DB[config.key] = DB[config.key].filter(x=>x.id!==id);
+      saveDB(); renderTable(); toast('Data dihapus.');
+    }
+    function openForm(id){
+      const editing = !!id;
+      const row = editing ? DB[config.key].find(x=>x.id===id) : {};
+      const fieldsHtml = config.formFields.map(f=>{
+        const val = row[f.field] ?? '';
+        if(f.type==='select'){
+          const opts = (typeof f.options==='function' ? f.options() : f.options).map(o=>
+            `<option value="${escapeHtml(o.value)}" ${String(val)===String(o.value)?'selected':''}>${escapeHtml(o.label)}</option>`).join('');
+          return `<div class="field ${f.full?'full':''}"><label>${f.label}${f.required?' *':''}</label><select name="${f.field}" ${f.required?'required':''}>${f.type==='select'&&!f.required?'<option value="">–</option>':''}${opts}</select></div>`;
+        }
+        return `<div class="field ${f.full?'full':''}"><label>${f.label}${f.required?' *':''}</label><input type="${f.type||'text'}" name="${f.field}" value="${escapeHtml(val)}" ${f.step?`step="${f.step}"`:''} ${f.required?'required':''} placeholder="${f.placeholder||''}"></div>`;
+      }).join('');
+      openModal((editing?'Edit ':'Tambah ')+config.title, `
+        <form id="crudForm">
+          <div class="form-grid">${fieldsHtml}</div>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" id="cancelFormBtn">Batal</button>
+            <button type="submit" class="btn btn-primary">${editing?'Simpan Perubahan':'Tambah Data'}</button>
+          </div>
+        </form>`, {wide:config.wideForm});
+      document.getElementById('cancelFormBtn').onclick = closeModal;
+      document.getElementById('crudForm').onsubmit = (e)=>{
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const obj = editing ? row : {id:uid()};
+        config.formFields.forEach(f=>{
+          let v = fd.get(f.field);
+          if(f.type==='number') v = v===''? 0 : parseFloat(v);
+          obj[f.field] = v;
+        });
+        if(config.beforeSave) config.beforeSave(obj);
+        if(!editing) DB[config.key].push(obj);
+        saveDB(); closeModal(); renderTable(); toast(editing?'Perubahan disimpan.':'Data ditambahkan.');
+      };
+    }
+    mount.innerHTML = `
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <input type="text" class="search-input" id="crudSearch" placeholder="Cari ${config.title.toLowerCase()}...">
+          <span class="pill">${getRows().length} data</span>
+        </div>
+        ${canEdit?`<button class="btn btn-primary btn-sm" id="addRowBtn">+ Tambah Data</button>`:''}
+      </div>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr>${config.columns.map(c=>`<th>${c.label}</th>`).join('')}<th>Aksi</th></tr></thead>
+        <tbody id="crudTableBody"></tbody>
+      </table></div>
+    `;
+    renderTable();
+    document.getElementById('crudSearch').oninput = (e)=>{ searchTerm=e.target.value; renderTable();
+      document.querySelector('.pill').textContent = getRows().length+' data'; };
+    if(canEdit) document.getElementById('addRowBtn').onclick = ()=>openForm(null);
+  };
+}
+
+/* =====================================================
+   MASTER DATA: PRODUK
+===================================================== */
+PAGE_RENDERERS.produk = makeCrudPage({
+  key:'produk', title:'Produk Jadi',
+  searchFields:['kode','nama'],
+  columns:[
+    {field:'kode', label:'Kode'},
+    {field:'nama', label:'Nama Produk'},
+    {field:'volume', label:'Volume (ml)', num:true},
+    {field:'isiPerDus', label:'Isi / Dus (pcs)', num:true},
+    {field:'kapasitasDusPerJam', label:'Kap. Dus/Jam', num:true},
+    {field:'kapasitasPcsPerJam', label:'Kap. Pcs/Jam', num:true},
+  ],
+  formFields:[
+    {field:'kode', label:'Kode Produk', required:true, placeholder:'PF-EDT-050'},
+    {field:'nama', label:'Nama Produk', required:true, full:true},
+    {field:'volume', label:'Volume (ml)', type:'number', required:true},
+    {field:'isiPerDus', label:'Isi per Dus (pcs)', type:'number', required:true},
+    {field:'kapasitasDusPerJam', label:'Kapasitas Standar (dus/jam)', type:'number'},
+    {field:'kapasitasPcsPerJam', label:'Kapasitas Standar (pcs/jam)', type:'number', required:true},
+  ]
+});
+
+/* =====================================================
+   MASTER DATA: MESIN
+===================================================== */
+PAGE_RENDERERS.mesin = makeCrudPage({
+  key:'mesin', title:'Mesin',
+  searchFields:['kode','nama','area'],
+  columns:[
+    {field:'kode', label:'Kode'},
+    {field:'nama', label:'Nama Mesin'},
+    {field:'area', label:'Area / Line'},
+    {field:'kapasitasStandar', label:'Kap. Standar (pcs/jam)', num:true},
+  ],
+  formFields:[
+    {field:'kode', label:'Kode Mesin', required:true, placeholder:'FL-01'},
+    {field:'nama', label:'Nama Mesin', required:true},
+    {field:'area', label:'Area / Line', required:true},
+    {field:'kapasitasStandar', label:'Kapasitas Standar (pcs/jam)', type:'number'},
+  ]
+});
+
+/* =====================================================
+   MASTER DATA: OPERATOR
+===================================================== */
+PAGE_RENDERERS.operator = makeCrudPage({
+  key:'operator', title:'Operator',
+  searchFields:['nik','nama','area'],
+  columns:[
+    {field:'nik', label:'NIK'},
+    {field:'nama', label:'Nama'},
+    {field:'shift', label:'Shift'},
+    {field:'area', label:'Area'},
+  ],
+  formFields:[
+    {field:'nik', label:'NIK', required:true},
+    {field:'nama', label:'Nama Operator', required:true},
+    {field:'shift', label:'Shift', type:'select', required:true, options:()=>DB.shiftMaster.map(s=>({value:s.nama,label:s.nama}))},
+    {field:'area', label:'Area', required:true},
+  ]
+});
+
+/* =====================================================
+   MASTER DATA: KAPASITAS PRODUKSI (per produk & mesin)
+===================================================== */
+PAGE_RENDERERS.kapasitas = makeCrudPage({
+  key:'kapasitas', title:'Kapasitas Produksi',
+  searchFields:[],
+  wideForm:false,
+  columns:[
+    {field:'produkId', label:'Produk', render:r=>escapeHtml(produkName(r.produkId))},
+    {field:'mesinId', label:'Mesin', render:r=>escapeHtml(mesinName(r.mesinId))},
+    {field:'kapasitasPcsPerJam', label:'Kap. Standar (pcs/jam)', num:true},
+    {field:'kapDus', label:'≈ Dus/Jam', num:true, render:r=>{
+      const p = DB.produk.find(x=>x.id===r.produkId);
+      const isi = p? p.isiPerDus : 0;
+      return isi ? fmtNum(r.kapasitasPcsPerJam/isi,1) : '–';
+    }},
+  ],
+  formFields:[
+    {field:'produkId', label:'Produk', type:'select', required:true, full:true, options:()=>DB.produk.map(p=>({value:p.id,label:p.kode+' — '+p.nama}))},
+    {field:'mesinId', label:'Mesin', type:'select', required:true, full:true, options:()=>DB.mesin.map(m=>({value:m.id,label:m.kode+' — '+m.nama}))},
+    {field:'kapasitasPcsPerJam', label:'Kapasitas Standar (pcs/jam)', type:'number', required:true, full:true},
+  ]
+});
+
+/* =====================================================
+   SHIFT / WAKTU (managed inside settings, but expose read here if needed)
+===================================================== */
+
+/* =====================================================
+   USERS (Pengguna)
+===================================================== */
+PAGE_RENDERERS.users = function(mount){
+  const canEdit = can('users','edit');
+  async function refresh(){ await loadUsers(); renderTable(); }
+  function renderTable(){
+    const rows = DB.users.slice().sort((a,b)=>(a.nama||'').localeCompare(b.nama||''));
+    document.getElementById('userTableBody').innerHTML = rows.length ? rows.map(u=>`
+      <tr>
+        <td>${escapeHtml(u.email||'–')}</td>
+        <td>${escapeHtml(u.nama||'–')}</td>
+        <td><span class="pill">${ROLE_LABEL[u.role]||u.role}</span></td>
+        <td>${escapeHtml(u.area||'–')}</td>
+        <td style="font-family:var(--font-mono);font-size:11px;color:var(--ink-400);">${escapeHtml((u.uid||'').slice(0,10))}…</td>
+        <td><div class="row-actions">
+          ${canEdit?`<button class="icon-btn" data-eu="${u.uid}" title="Ubah role">✎</button>
+          ${u.uid!==SESSION.uid?`<button class="icon-btn del" data-du="${u.uid}" title="Hapus profil">🗑</button>`:''}`:''}
+        </div></td>
+      </tr>`).join('') : `<tr class="empty-row"><td colspan="6">Belum ada pengguna terdaftar.</td></tr>`;
+    document.querySelectorAll('[data-eu]').forEach(b=>b.onclick=()=>openEdit(b.dataset.eu));
+    document.querySelectorAll('[data-du]').forEach(b=>b.onclick=()=>removeUser(b.dataset.du));
+  }
+  function roleOptions(sel){
+    return ['staff','supervisor','manager','direksi'].map(r=>`<option value="${r}" ${sel===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join('');
+  }
+  function openEdit(uid2){
+    const u = DB.users.find(x=>x.uid===uid2); if(!u) return;
+    openModal('Ubah Profil Pengguna', `
+      <form id="uForm">
+        <div class="form-grid">
+          <div class="field full"><label>Email (akun login)</label><input value="${escapeHtml(u.email||'')}" disabled></div>
+          <div class="field"><label>Nama Lengkap *</label><input name="nama" value="${escapeHtml(u.nama||'')}" required></div>
+          <div class="field"><label>Role *</label><select name="role" required>${roleOptions(u.role)}</select></div>
+          <div class="field full"><label>Area / Divisi</label><input name="area" value="${escapeHtml(u.area||'')}"></div>
+        </div>
+        <div class="form-actions"><button type="button" class="btn btn-ghost" id="cu">Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
+      </form>`);
+    document.getElementById('cu').onclick = closeModal;
+    document.getElementById('uForm').onsubmit = async (e)=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      try{
+        await saveUserProfile(uid2, {email:u.email, nama:fd.get('nama'), role:fd.get('role'), area:fd.get('area')||''});
+        closeModal(); await refresh(); toast('Profil pengguna disimpan.');
+      }catch(err){ toast('Gagal menyimpan: '+err.message, true); }
+    };
+  }
+  async function removeUser(uid2){
+    if(!confirm('Hapus profil pengguna ini? Akun login di Firebase Authentication harus dihapus terpisah lewat Firebase Console.')) return;
+    try{ await deleteUserProfile(uid2); await refresh(); toast('Profil pengguna dihapus.'); }
+    catch(err){ toast('Gagal menghapus: '+err.message, true); }
+  }
+  function openCreate(){
+    openModal('Buat Akun Pengguna Baru', `
+      <form id="ncForm">
+        <div class="form-grid">
+          <div class="field"><label>Email *</label><input type="email" name="email" required placeholder="nama@mmi.co.id"></div>
+          <div class="field"><label>Password *</label><input type="password" name="password" required minlength="6" placeholder="Min. 6 karakter"></div>
+          <div class="field"><label>Nama Lengkap *</label><input name="nama" required></div>
+          <div class="field"><label>Role *</label><select name="role" required>${roleOptions('staff')}</select></div>
+          <div class="field full"><label>Area / Divisi</label><input name="area"></div>
+        </div>
+        <p style="font-size:12px;color:var(--ink-200);margin-top:12px;">Akun dibuat langsung di Firebase Authentication. Sesi Anda tidak akan terputus.</p>
+        <div class="form-actions"><button type="button" class="btn btn-ghost" id="cn">Batal</button><button type="submit" class="btn btn-primary" id="ncSubmit">Buat Akun</button></div>
+      </form>`);
+    document.getElementById('cn').onclick = closeModal;
+    document.getElementById('ncForm').onsubmit = async (e)=>{
+      e.preventDefault();
+      if(!FB_READY){ toast('Firebase belum terkonfigurasi.', true); return; }
+      const fd = new FormData(e.target);
+      const btn = document.getElementById('ncSubmit'); btn.disabled=true; btn.textContent='Membuat…';
+      try{
+        // app sekunder agar sesi login manager tidak tergantikan akun baru
+        const secondary = firebase.apps.find(a=>a.name==='secondary') || firebase.initializeApp(FIREBASE_CONFIG,'secondary');
+        const cred = await secondary.auth().createUserWithEmailAndPassword(fd.get('email'), fd.get('password'));
+        await saveUserProfile(cred.user.uid, {email:fd.get('email'), nama:fd.get('nama'), role:fd.get('role'), area:fd.get('area')||''});
+        await secondary.auth().signOut();
+        closeModal(); await refresh(); toast('Akun pengguna dibuat.');
+      }catch(err){
+        btn.disabled=false; btn.textContent='Buat Akun';
+        toast('Gagal membuat akun: '+(err.message||err.code), true);
+      }
+    };
+  }
+  mount.innerHTML = `
+    <div class="toolbar">
+      <div class="toolbar-left"><span class="pill" id="userCount">–</span></div>
+      ${canEdit?`<button class="btn btn-primary btn-sm" id="addUserBtn">+ Buat Akun</button>`:''}
+    </div>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Email</th><th>Nama</th><th>Role</th><th>Area</th><th>UID</th><th>Aksi</th></tr></thead>
+      <tbody id="userTableBody"><tr class="empty-row"><td colspan="6">Memuat…</td></tr></tbody>
+    </table></div>
+  `;
+  if(canEdit) document.getElementById('addUserBtn').onclick = openCreate;
+  refresh().then(()=>{ document.getElementById('userCount').textContent = DB.users.length+' pengguna'; });
+};
+
+/* =====================================================
+   INPUT OEE (produksi harian per shift)
+===================================================== */
+PAGE_RENDERERS.oeeInput = function(mount){
+  const canEdit = can('oeeInput','edit');
+  let filterFrom='', filterTo='', filterMesin='';
+  function getRows(){
+    let rows = filterOee({from:filterFrom||null, to:filterTo||null, mesinId:filterMesin||null});
+    return rows.sort((a,b)=> b.tanggal.localeCompare(a.tanggal));
+  }
+  function renderTable(){
+    const rows = getRows();
+    const body = rows.length ? rows.map(r=>{
+      const c = calcOeeRow(r);
+      const cls = c.oee>=0.85?'good':(c.oee>=0.65?'warn':'bad');
+      return `<tr>
+        <td>${fmtDate(r.tanggal)}</td>
+        <td>${escapeHtml(r.shift)}</td>
+        <td>${escapeHtml(mesinName(r.mesinId))}</td>
+        <td>${escapeHtml(produkName(r.produkId))}</td>
+        <td>${escapeHtml(operatorName(r.operatorId))}</td>
+        <td class="num">${fmtNum(r.plannedTimeMenit,0)}</td>
+        <td class="num">${fmtNum(r.downtimeMenit,0)}</td>
+        <td class="num">${fmtNum(r.totalCount,0)}</td>
+        <td class="num">${fmtNum(r.rejectCount,0)}</td>
+        <td><span class="pill ${cls}">${pct(c.oee)}</span></td>
+        <td><div class="row-actions">
+          ${canEdit?`<button class="icon-btn" data-edit="${r.id}" title="Edit">✎</button><button class="icon-btn del" data-del="${r.id}" title="Hapus">🗑</button>`:''}
+        </div></td>
+      </tr>`;
+    }).join('') : `<tr class="empty-row"><td colspan="11">Tidak ada data pada filter ini.</td></tr>`;
+    document.getElementById('oeeTableBody').innerHTML = body;
+    document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openForm(b.dataset.edit));
+    document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
+      if(!confirm('Hapus data input OEE ini?')) return;
+      DB.oeeInput = DB.oeeInput.filter(x=>x.id!==b.dataset.del);
+      saveDB(); renderTable(); toast('Data dihapus.');
+    });
+  }
+  function openForm(id){
+    const editing = !!id;
+    const row = editing ? DB.oeeInput.find(x=>x.id===id) : {tanggal:todayStr(), shift:DB.shiftMaster[0]?.nama||'', plannedTimeMenit:480};
+    openModal((editing?'Edit ':'Tambah ')+'Input OEE', `
+      <form id="oeeForm">
+        <div class="form-grid">
+          <div class="field"><label>Tanggal *</label><input type="date" name="tanggal" value="${row.tanggal||todayStr()}" required></div>
+          <div class="field"><label>Shift *</label><select name="shift" required>${DB.shiftMaster.map(s=>`<option value="${escapeHtml(s.nama)}" ${row.shift===s.nama?'selected':''}>${escapeHtml(s.nama)} (${s.jamMulai}–${s.jamSelesai})</option>`).join('')}</select></div>
+          <div class="field"><label>Mesin *</label><select name="mesinId" required>${DB.mesin.map(m=>`<option value="${m.id}" ${row.mesinId===m.id?'selected':''}>${escapeHtml(m.kode)} — ${escapeHtml(m.nama)}</option>`).join('')}</select></div>
+          <div class="field"><label>Produk *</label><select name="produkId" required>${DB.produk.map(p=>`<option value="${p.id}" ${row.produkId===p.id?'selected':''}>${escapeHtml(p.kode)} — ${escapeHtml(p.nama)}</option>`).join('')}</select></div>
+          <div class="field"><label>Operator</label><select name="operatorId">${DB.operator.map(o=>`<option value="${o.id}" ${row.operatorId===o.id?'selected':''}>${escapeHtml(o.nama)}</option>`).join('')}</select></div>
+          <div class="field"><label>Planned Time (menit) *</label><input type="number" name="plannedTimeMenit" value="${row.plannedTimeMenit??480}" required></div>
+          <div class="field"><label>Total Downtime (menit) *</label><input type="number" name="downtimeMenit" value="${row.downtimeMenit??0}" required></div>
+          <div class="field"><label>Total Produksi (pcs) *</label><input type="number" name="totalCount" value="${row.totalCount??0}" required></div>
+          <div class="field"><label>Reject (pcs) *</label><input type="number" name="rejectCount" value="${row.rejectCount??0}" required></div>
+          <div class="field full"><label>Catatan</label><input type="text" name="catatan" value="${escapeHtml(row.catatan||'')}"></div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="cancelOeeBtn">Batal</button>
+          <button type="submit" class="btn btn-primary">${editing?'Simpan Perubahan':'Tambah Data'}</button>
+        </div>
+      </form>
+    `, {wide:true});
+    document.getElementById('cancelOeeBtn').onclick = closeModal;
+    document.getElementById('oeeForm').onsubmit = (e)=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const obj = editing ? row : {id:uid()};
+      ['tanggal','shift','mesinId','produkId','operatorId','catatan'].forEach(f=> obj[f]=fd.get(f));
+      ['plannedTimeMenit','downtimeMenit','totalCount','rejectCount'].forEach(f=> obj[f]=parseFloat(fd.get(f))||0);
+      if(!editing) DB.oeeInput.push(obj);
+      saveDB(); closeModal(); renderTable(); toast(editing?'Perubahan disimpan.':'Data OEE ditambahkan.');
+    };
+  }
+  mount.innerHTML = `
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <input type="date" class="select-sm" id="fFrom"> <span style="color:var(--ink-400);font-size:12px;">s/d</span>
+        <input type="date" class="select-sm" id="fTo">
+        <select class="select-sm" id="fMesin"><option value="">Semua Mesin</option>${DB.mesin.map(m=>`<option value="${m.id}">${escapeHtml(m.nama)}</option>`).join('')}</select>
+      </div>
+      ${canEdit?`<button class="btn btn-primary btn-sm" id="addOeeBtn">+ Tambah Input</button>`:''}
+    </div>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Tanggal</th><th>Shift</th><th>Mesin</th><th>Produk</th><th>Operator</th><th>Planned (mnt)</th><th>Downtime (mnt)</th><th>Total (pcs)</th><th>Reject (pcs)</th><th>OEE</th><th>Aksi</th></tr></thead>
+      <tbody id="oeeTableBody"></tbody>
+    </table></div>
+  `;
+  renderTable();
+  document.getElementById('fFrom').oninput = e=>{filterFrom=e.target.value; renderTable();};
+  document.getElementById('fTo').oninput = e=>{filterTo=e.target.value; renderTable();};
+  document.getElementById('fMesin').onchange = e=>{filterMesin=e.target.value; renderTable();};
+  if(canEdit) document.getElementById('addOeeBtn').onclick = ()=>openForm(null);
+};
+
+/* =====================================================
+   DOWNTIME RECORDS
+===================================================== */
+PAGE_RENDERERS.downtime = function(mount){
+  const canEdit = can('downtime','edit');
+  let filterMesin='', filterCat='';
+  function getRows(){
+    let rows = DB.downtime.slice().sort((a,b)=>b.tanggal.localeCompare(a.tanggal));
+    if(filterMesin) rows = rows.filter(r=>r.mesinId===filterMesin);
+    if(filterCat) rows = rows.filter(r=>r.kategori===filterCat);
+    return rows;
+  }
+  function renderTable(){
+    const rows = getRows();
+    const body = rows.length ? rows.map(r=>`<tr>
+        <td>${fmtDate(r.tanggal)}</td><td>${escapeHtml(r.shift)}</td><td>${escapeHtml(mesinName(r.mesinId))}</td>
+        <td><span class="pill warn">${escapeHtml(r.kategori)}</span></td>
+        <td class="num">${fmtNum(r.durasiMenit,0)}</td>
+        <td>${escapeHtml(r.keterangan||'–')}</td>
+        <td><div class="row-actions">${canEdit?`<button class="icon-btn" data-edit="${r.id}">✎</button><button class="icon-btn del" data-del="${r.id}">🗑</button>`:''}</div></td>
+      </tr>`).join('') : `<tr class="empty-row"><td colspan="7">Tidak ada data downtime.</td></tr>`;
+    document.getElementById('dtTableBody').innerHTML = body;
+    document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openForm(b.dataset.edit));
+    document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
+      if(!confirm('Hapus record downtime ini?')) return;
+      DB.downtime = DB.downtime.filter(x=>x.id!==b.dataset.del);
+      saveDB(); renderTable(); toast('Data dihapus.');
+    });
+  }
+  function openForm(id){
+    const editing = !!id;
+    const row = editing ? DB.downtime.find(x=>x.id===id) : {tanggal:todayStr(), shift:DB.shiftMaster[0]?.nama||''};
+    openModal((editing?'Edit ':'Tambah ')+'Downtime', `
+      <form id="dtForm">
+        <div class="form-grid">
+          <div class="field"><label>Tanggal *</label><input type="date" name="tanggal" value="${row.tanggal||todayStr()}" required></div>
+          <div class="field"><label>Shift *</label><select name="shift" required>${DB.shiftMaster.map(s=>`<option value="${escapeHtml(s.nama)}" ${row.shift===s.nama?'selected':''}>${escapeHtml(s.nama)}</option>`).join('')}</select></div>
+          <div class="field"><label>Mesin *</label><select name="mesinId" required>${DB.mesin.map(m=>`<option value="${m.id}" ${row.mesinId===m.id?'selected':''}>${escapeHtml(m.nama)}</option>`).join('')}</select></div>
+          <div class="field"><label>Kategori *</label><select name="kategori" required>${DB.settings.downtimeCategories.map(c=>`<option value="${escapeHtml(c)}" ${row.kategori===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}</select></div>
+          <div class="field"><label>Durasi (menit) *</label><input type="number" name="durasiMenit" value="${row.durasiMenit??0}" required></div>
+          <div class="field full"><label>Keterangan</label><input type="text" name="keterangan" value="${escapeHtml(row.keterangan||'')}"></div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" id="cancelDtBtn">Batal</button>
+          <button type="submit" class="btn btn-primary">${editing?'Simpan Perubahan':'Tambah Data'}</button>
+        </div>
+      </form>
+    `);
+    document.getElementById('cancelDtBtn').onclick = closeModal;
+    document.getElementById('dtForm').onsubmit = (e)=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const obj = editing ? row : {id:uid()};
+      ['tanggal','shift','mesinId','kategori','keterangan'].forEach(f=> obj[f]=fd.get(f));
+      obj.durasiMenit = parseFloat(fd.get('durasiMenit'))||0;
+      if(!editing) DB.downtime.push(obj);
+      saveDB(); closeModal(); renderTable(); toast(editing?'Perubahan disimpan.':'Downtime ditambahkan.');
+    };
+  }
+  mount.innerHTML = `
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <select class="select-sm" id="fdMesin"><option value="">Semua Mesin</option>${DB.mesin.map(m=>`<option value="${m.id}">${escapeHtml(m.nama)}</option>`).join('')}</select>
+        <select class="select-sm" id="fdCat"><option value="">Semua Kategori</option>${DB.settings.downtimeCategories.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}</select>
+      </div>
+      ${canEdit?`<button class="btn btn-primary btn-sm" id="addDtBtn">+ Tambah Downtime</button>`:''}
+    </div>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Tanggal</th><th>Shift</th><th>Mesin</th><th>Kategori</th><th>Durasi (mnt)</th><th>Keterangan</th><th>Aksi</th></tr></thead>
+      <tbody id="dtTableBody"></tbody>
+    </table></div>
+  `;
+  renderTable();
+  document.getElementById('fdMesin').onchange = e=>{filterMesin=e.target.value; renderTable();};
+  document.getElementById('fdCat').onchange = e=>{filterCat=e.target.value; renderTable();};
+  if(canEdit) document.getElementById('addDtBtn').onclick = ()=>openForm(null);
+};
+
+/* =====================================================
+   DASHBOARD
+===================================================== */
+let dashCharts = {};
+function destroyDashCharts(){ Object.values(dashCharts).forEach(c=>c && c.destroy()); dashCharts={}; }
+
+function kpiClass(val, target){
+  if(val>=target) return 'kpi-good';
+  if(val>=target*0.85) return 'kpi-warn';
+  return 'kpi-bad';
+}
+
+PAGE_RENDERERS.dashboard = function(mount){
+  const def = last30DaysRange();
+  let from = def.from, to = def.to, mesinF='', produkF='';
+
+  function draw(){
+    const rows = filterOee({from,to,mesinId:mesinF||null, produkId:produkF||null});
+    const agg = aggregateOee(rows);
+    const dt = filterDowntime({from,to,mesinId:mesinF||null});
+    const targets = DB.settings.oeeTargets;
+
+    mount.innerHTML = `
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <input type="date" class="select-sm" id="dFrom" value="${from}">
+          <span style="color:var(--ink-400);font-size:12px;">s/d</span>
+          <input type="date" class="select-sm" id="dTo" value="${to}">
+          <select class="select-sm" id="dMesin"><option value="">Semua Mesin</option>${DB.mesin.map(m=>`<option value="${m.id}" ${mesinF===m.id?'selected':''}>${escapeHtml(m.nama)}</option>`).join('')}</select>
+          <select class="select-sm" id="dProduk"><option value="">Semua Produk</option>${DB.produk.map(p=>`<option value="${p.id}" ${produkF===p.id?'selected':''}>${escapeHtml(p.kode)}</option>`).join('')}</select>
+        </div>
+        <span class="pill">${rows.length} shift entry</span>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi-card ${kpiClass(agg.oee,targets.oee)}"><div class="kv">${pct(agg.oee)}</div><div class="kl">OEE Rata-rata</div><div class="kd">Target ${pct(targets.oee)}</div><div class="bar" style="width:${clamp(agg.oee,0,1)*100}%"></div></div>
+        <div class="kpi-card ${kpiClass(agg.availability,targets.availability)}"><div class="kv">${pct(agg.availability)}</div><div class="kl">Availability</div><div class="kd">Target ${pct(targets.availability)}</div><div class="bar" style="width:${clamp(agg.availability,0,1)*100}%"></div></div>
+        <div class="kpi-card ${kpiClass(agg.performance,targets.performance)}"><div class="kv">${pct(agg.performance)}</div><div class="kl">Performance</div><div class="kd">Target ${pct(targets.performance)}</div><div class="bar" style="width:${clamp(agg.performance,0,1)*100}%"></div></div>
+        <div class="kpi-card ${kpiClass(agg.quality,targets.quality)}"><div class="kv">${pct(agg.quality)}</div><div class="kl">Quality</div><div class="kd">Target ${pct(targets.quality)}</div><div class="bar" style="width:${clamp(agg.quality,0,1)*100}%"></div></div>
+        <div class="kpi-card kpi-brass"><div class="kv">${fmtNum(agg.rejectCount,0)}</div><div class="kl">Total Reject (pcs)</div><div class="kd">dari ${fmtNum(agg.totalCount,0)} pcs</div></div>
+        <div class="kpi-card kpi-brass"><div class="kv">${fmtNum(agg.downtimeMenit,0)}</div><div class="kl">Total Downtime (menit)</div><div class="kd">${fmtNum(agg.downtimeMenit/60,1)} jam</div></div>
+      </div>
+
+      <div class="grid-2" style="margin-bottom:16px;">
+        <div class="card">
+          <div class="card-title">Tren OEE (Availability · Performance · Quality)<span class="hint">${fmtDate(from)} – ${fmtDate(to)}</span></div>
+          <div class="chart-box"><canvas id="chartTrend"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Komposisi OEE Saat Ini</div>
+          <div class="gauge-wrap">
+            <div class="gauge"><svg viewBox="0 0 120 120" width="150" height="150">
+              <circle cx="60" cy="60" r="52" fill="none" stroke="var(--ink-800)" stroke-width="12"/>
+              <circle cx="60" cy="60" r="52" fill="none" stroke="${agg.oee>=targets.oee?'var(--good)':(agg.oee>=targets.oee*0.85?'var(--warn)':'var(--bad)')}" stroke-width="12" stroke-linecap="round"
+                stroke-dasharray="${2*Math.PI*52}" stroke-dashoffset="${2*Math.PI*52*(1-clamp(agg.oee,0,1))}"/>
+            </svg><div class="gval"><b>${pct(agg.oee,0)}</b><span>OEE</span></div></div>
+            <div class="apq-mini">
+              <div class="apq-row"><div class="lb">Avail.</div><div class="track"><div class="fill" style="width:${clamp(agg.availability,0,1)*100}%;background:var(--teal-bright)"></div></div><div class="vv">${pct(agg.availability,0)}</div></div>
+              <div class="apq-row"><div class="lb">Perf.</div><div class="track"><div class="fill" style="width:${clamp(agg.performance,0,1)*100}%;background:var(--brass-bright)"></div></div><div class="vv">${pct(agg.performance,0)}</div></div>
+              <div class="apq-row"><div class="lb">Qual.</div><div class="track"><div class="fill" style="width:${clamp(agg.quality,0,1)*100}%;background:var(--good)"></div></div><div class="vv">${pct(agg.quality,0)}</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-bottom:16px;">
+        <div class="card">
+          <div class="card-title">OEE per Mesin</div>
+          <div class="chart-box sm"><canvas id="chartMesin"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Pareto Downtime per Kategori</div>
+          <div class="chart-box sm"><canvas id="chartPareto"></canvas></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">💡 Insight AI <span class="hint">Analisis otomatis dari data periode terpilih</span></div>
+        <div class="insight-list" id="insightList"></div>
+      </div>
+    `;
+
+    document.getElementById('dFrom').onchange = e=>{from=e.target.value; draw();};
+    document.getElementById('dTo').onchange = e=>{to=e.target.value; draw();};
+    document.getElementById('dMesin').onchange = e=>{mesinF=e.target.value; draw();};
+    document.getElementById('dProduk').onchange = e=>{produkF=e.target.value; draw();};
+
+    destroyDashCharts();
+    const trendData = groupByPeriod(rows, (rows.length>45?'week':'day'));
+    dashCharts.trend = new Chart(document.getElementById('chartTrend'), {
+      type:'line',
+      data:{ labels: trendData.map(t=>t.label),
+        datasets:[
+          {label:'OEE', data:trendData.map(t=>+(t.agg.oee*100).toFixed(1)), borderColor:'#6a55c4', backgroundColor:'rgba(106,85,196,.12)', tension:.3, fill:true},
+          {label:'Availability', data:trendData.map(t=>+(t.agg.availability*100).toFixed(1)), borderColor:'#2f8f89', tension:.3, borderDash:[4,3]},
+          {label:'Performance', data:trendData.map(t=>+(t.agg.performance*100).toFixed(1)), borderColor:'#c08a22', tension:.3, borderDash:[4,3]},
+          {label:'Quality', data:trendData.map(t=>+(t.agg.quality*100).toFixed(1)), borderColor:'#3d8f63', tension:.3, borderDash:[4,3]},
+        ]},
+      options: chartOptsLine()
+    });
+
+    const byMesin = {};
+    rows.forEach(r=>{ (byMesin[r.mesinId]=byMesin[r.mesinId]||[]).push(r); });
+    const mesinLabels = Object.keys(byMesin).map(id=>mesinName(id));
+    const mesinVals = Object.keys(byMesin).map(id=>+(aggregateOee(byMesin[id]).oee*100).toFixed(1));
+    dashCharts.mesin = new Chart(document.getElementById('chartMesin'), {
+      type:'bar',
+      data:{labels:mesinLabels, datasets:[{label:'OEE %', data:mesinVals, backgroundColor:mesinVals.map(v=>v>=85?'#3d8f63':(v>=65?'#c08a22':'#c4503f')), borderRadius:4}]},
+      options: chartOptsBar()
+    });
+
+    const byCat = {};
+    dt.forEach(d=>{ byCat[d.kategori]=(byCat[d.kategori]||0)+(d.durasiMenit||0); });
+    const catSorted = Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
+    let cum=0; const totalDt = catSorted.reduce((s,x)=>s+x[1],0);
+    const cumArr = catSorted.map(x=>{ cum+=x[1]; return totalDt? +(cum/totalDt*100).toFixed(1) : 0; });
+    dashCharts.pareto = new Chart(document.getElementById('chartPareto'), {
+      data:{ labels: catSorted.map(x=>x[0]),
+        datasets:[
+          {type:'bar', label:'Menit', data:catSorted.map(x=>x[1]), backgroundColor:'#6a55c4', borderRadius:4, yAxisID:'y'},
+          {type:'line', label:'Kumulatif %', data:cumArr, borderColor:'#2f8f89', yAxisID:'y1', tension:.2},
+        ]},
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        interaction:{mode:'index',intersect:false},
+        plugins:{legend:{labels:{color:'#585373', font:{size:10.5}}}},
+        scales:{
+          x:{ticks:{color:'#585373', font:{size:10}, maxRotation:40, minRotation:0}, grid:{color:'rgba(36,31,61,.07)'}},
+          y:{ticks:{color:'#585373', font:{size:10}}, grid:{color:'rgba(36,31,61,.07)'}},
+          y1:{position:'right', min:0, max:100, ticks:{color:'#585373', font:{size:10}}, grid:{display:false}},
+        }
+      }
+    });
+
+    const insights = generateInsights({from,to});
+    document.getElementById('insightList').innerHTML = insights.map(i=>`<div class="insight-item ${i.type}"><span class="ic">${i.ic}</span><div>${i.html}</div></div>`).join('');
+  }
+  draw();
+};
+
+function chartOptsLine(){
+  return {
+    responsive:true, maintainAspectRatio:false,
+    plugins:{legend:{labels:{color:'#585373', font:{size:10.5}, boxWidth:12}}},
+    scales:{
+      x:{ticks:{color:'#585373', font:{size:10}, maxRotation:40}, grid:{color:'rgba(36,31,61,.07)'}},
+      y:{min:0, max:100, ticks:{color:'#585373', font:{size:10}, callback:v=>v+'%'}, grid:{color:'rgba(36,31,61,.07)'}}
+    }
+  };
+}
+function chartOptsBar(){
+  return {
+    responsive:true, maintainAspectRatio:false,
+    plugins:{legend:{display:false}},
+    scales:{
+      x:{ticks:{color:'#585373', font:{size:10}}, grid:{display:false}},
+      y:{min:0, max:100, ticks:{color:'#585373', font:{size:10}, callback:v=>v+'%'}, grid:{color:'rgba(36,31,61,.07)'}}
+    }
+  };
+}
+
+/* =====================================================
+   LAPORAN
+===================================================== */
+let lapCharts = {};
+PAGE_RENDERERS.laporan = function(mount){
+  const def = last30DaysRange();
+  let from=def.from, to=def.to, mesinF='', produkF='', groupMode='mesin'; // mesin|produk|day|week|month
+
+  function computeGroups(rows){
+    if(groupMode==='mesin'){
+      const map={}; rows.forEach(r=>{(map[r.mesinId]=map[r.mesinId]||[]).push(r);});
+      return Object.keys(map).map(id=>({label:mesinName(id), agg:aggregateOee(map[id])})).sort((a,b)=>b.agg.oee-a.agg.oee);
+    }
+    if(groupMode==='produk'){
+      const map={}; rows.forEach(r=>{(map[r.produkId]=map[r.produkId]||[]).push(r);});
+      return Object.keys(map).map(id=>({label:produkName(id), agg:aggregateOee(map[id])})).sort((a,b)=>b.agg.oee-a.agg.oee);
+    }
+    const pm = groupMode==='day'?'day':(groupMode==='week'?'week':'month');
+    return groupByPeriod(rows, pm);
+  }
+
+  function draw(){
+    const rows = filterOee({from,to,mesinId:mesinF||null,produkId:produkF||null});
+    const agg = aggregateOee(rows);
+    const groups = computeGroups(rows);
+
+    mount.innerHTML = `
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <input type="date" class="select-sm" id="lFrom" value="${from}">
+          <span style="color:var(--ink-400);font-size:12px;">s/d</span>
+          <input type="date" class="select-sm" id="lTo" value="${to}">
+          <select class="select-sm" id="lMesin"><option value="">Semua Mesin</option>${DB.mesin.map(m=>`<option value="${m.id}" ${mesinF===m.id?'selected':''}>${escapeHtml(m.nama)}</option>`).join('')}</select>
+          <select class="select-sm" id="lProduk"><option value="">Semua Produk</option>${DB.produk.map(p=>`<option value="${p.id}" ${produkF===p.id?'selected':''}>${escapeHtml(p.kode)}</option>`).join('')}</select>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="printBtn">🖨 Cetak Laporan</button>
+      </div>
+
+      <div class="tabs">
+        ${[['mesin','Per Mesin'],['produk','Per Produk'],['day','Harian'],['week','Mingguan'],['month','Bulanan']].map(([k,l])=>
+          `<button class="tab-btn ${groupMode===k?'active':''}" data-mode="${k}">${l}</button>`).join('')}
+      </div>
+
+      <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);">
+        <div class="kpi-card kpi-brass"><div class="kv">${pct(agg.oee)}</div><div class="kl">OEE Rata-rata</div></div>
+        <div class="kpi-card"><div class="kv">${pct(agg.availability)}</div><div class="kl">Availability</div></div>
+        <div class="kpi-card"><div class="kv">${pct(agg.performance)}</div><div class="kl">Performance</div></div>
+        <div class="kpi-card"><div class="kv">${pct(agg.quality)}</div><div class="kl">Quality</div></div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-title">Perbandingan OEE — ${({mesin:'Per Mesin',produk:'Per Produk',day:'Harian',week:'Mingguan',month:'Bulanan'})[groupMode]}</div>
+        <div class="chart-box"><canvas id="chartLaporan"></canvas></div>
+      </div>
+
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>${groupMode==='mesin'?'Mesin':groupMode==='produk'?'Produk':'Periode'}</th><th>Availability</th><th>Performance</th><th>Quality</th><th>OEE</th><th>Total Pcs</th><th>Reject</th><th>Downtime (mnt)</th></tr></thead>
+        <tbody>${groups.length? groups.map(g=>{
+          const cls = g.agg.oee>=0.85?'good':(g.agg.oee>=0.65?'warn':'bad');
+          return `<tr><td>${escapeHtml(g.label)}</td><td class="num">${pct(g.agg.availability)}</td><td class="num">${pct(g.agg.performance)}</td><td class="num">${pct(g.agg.quality)}</td><td class="num"><span class="pill ${cls}">${pct(g.agg.oee)}</span></td><td class="num">${fmtNum(g.agg.totalCount,0)}</td><td class="num">${fmtNum(g.agg.rejectCount,0)}</td><td class="num">${fmtNum(g.agg.downtimeMenit,0)}</td></tr>`;
+        }).join('') : `<tr class="empty-row"><td colspan="8">Tidak ada data pada filter ini.</td></tr>`}</tbody>
+      </table></div>
+    `;
+
+    document.getElementById('lFrom').onchange=e=>{from=e.target.value;draw();};
+    document.getElementById('lTo').onchange=e=>{to=e.target.value;draw();};
+    document.getElementById('lMesin').onchange=e=>{mesinF=e.target.value;draw();};
+    document.getElementById('lProduk').onchange=e=>{produkF=e.target.value;draw();};
+    document.querySelectorAll('.tab-btn').forEach(b=>b.onclick=()=>{groupMode=b.dataset.mode; draw();});
+    document.getElementById('printBtn').onclick = ()=>printLaporan({from,to,groups,agg,groupMode});
+
+    if(lapCharts.c) lapCharts.c.destroy();
+    lapCharts.c = new Chart(document.getElementById('chartLaporan'), {
+      type:'bar',
+      data:{labels:groups.map(g=>g.label), datasets:[{label:'OEE %', data:groups.map(g=>+(g.agg.oee*100).toFixed(1)), backgroundColor:groups.map(g=>g.agg.oee>=0.85?'#3d8f63':(g.agg.oee>=0.65?'#c08a22':'#c4503f')), borderRadius:4}]},
+      options: chartOptsBar()
+    });
+  }
+  draw();
+};
+
+function printLaporan({from,to,groups,agg,groupMode}){
+  const groupLabel = ({mesin:'Per Mesin',produk:'Per Produk',day:'Harian',week:'Mingguan',month:'Bulanan'})[groupMode];
+  const rowsHtml = groups.map(g=>`<tr><td>${escapeHtml(g.label)}</td><td>${pct(g.agg.availability)}</td><td>${pct(g.agg.performance)}</td><td>${pct(g.agg.quality)}</td><td>${pct(g.agg.oee)}</td><td>${fmtNum(g.agg.totalCount,0)}</td><td>${fmtNum(g.agg.rejectCount,0)}</td><td>${fmtNum(g.agg.downtimeMenit,0)}</td></tr>`).join('');
+  document.getElementById('printArea').innerHTML = `
+    <div class="p-head">
+      <div><h2 style="margin:0 0 4px;">${escapeHtml(DB.settings.companyName)}</h2><div>Laporan OEE — ${groupLabel}</div></div>
+      <div style="text-align:right;font-size:12px;">
+        <div>Periode: ${fmtDate(from)} – ${fmtDate(to)}</div>
+        <div>Dicetak: ${new Date().toLocaleString('id-ID')}</div>
+        <div>Oleh: ${escapeHtml(SESSION.nama)} (${ROLE_LABEL[SESSION.role]})</div>
+      </div>
+    </div>
+    <div style="margin-bottom:16px; font-size:12px;">
+      <b>Ringkasan:</b> OEE ${pct(agg.oee)} · Availability ${pct(agg.availability)} · Performance ${pct(agg.performance)} · Quality ${pct(agg.quality)} ·
+      Total Produksi ${fmtNum(agg.totalCount,0)} pcs · Reject ${fmtNum(agg.rejectCount,0)} pcs · Downtime ${fmtNum(agg.downtimeMenit,0)} menit
+    </div>
+    <table><thead><tr><th>${groupMode==='mesin'?'Mesin':groupMode==='produk'?'Produk':'Periode'}</th><th>Availability</th><th>Performance</th><th>Quality</th><th>OEE</th><th>Total Pcs</th><th>Reject</th><th>Downtime (mnt)</th></tr></thead>
+    <tbody>${rowsHtml}</tbody></table>
+    <div class="sig-row">
+      <div class="sig-box"><div class="sig-line">Staff / Supervisor</div></div>
+      <div class="sig-box"><div class="sig-line">Manager Produksi</div></div>
+      <div class="sig-box"><div class="sig-line">Direksi</div></div>
+    </div>
+  `;
+  window.print();
+}
+
+/* =====================================================
+   SETTINGS
+===================================================== */
+PAGE_RENDERERS.settings = function(mount){
+  function draw(){
+    mount.innerHTML = `
+      <div class="grid-2">
+        <div class="card settings-block">
+          <h4>Informasi Perusahaan</h4>
+          <div class="field"><label>Nama Perusahaan</label><input type="text" id="setCompany" value="${escapeHtml(DB.settings.companyName)}"></div>
+          <button class="btn btn-primary btn-sm" id="saveCompanyBtn">Simpan</button>
+        </div>
+        <div class="card settings-block">
+          <h4>Target OEE</h4>
+          <div class="form-grid">
+            <div class="field"><label>Target OEE (%)</label><input type="number" id="tOee" value="${(DB.settings.oeeTargets.oee*100).toFixed(0)}"></div>
+            <div class="field"><label>Target Availability (%)</label><input type="number" id="tAvail" value="${(DB.settings.oeeTargets.availability*100).toFixed(0)}"></div>
+            <div class="field"><label>Target Performance (%)</label><input type="number" id="tPerf" value="${(DB.settings.oeeTargets.performance*100).toFixed(0)}"></div>
+            <div class="field"><label>Target Quality (%)</label><input type="number" id="tQual" value="${(DB.settings.oeeTargets.quality*100).toFixed(0)}"></div>
+          </div>
+          <button class="btn btn-primary btn-sm" id="saveTargetBtn">Simpan Target</button>
+        </div>
+      </div>
+
+      <div class="card settings-block">
+        <h4>Kategori Downtime <span class="hint" style="font-family:var(--font-mono);font-size:11px;color:var(--ink-400);">Digunakan pada form input downtime</span></h4>
+        <div class="chip-row" id="catChips"></div>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <input type="text" class="search-input" id="newCatInput" placeholder="Tambah kategori baru...">
+          <button class="btn btn-ghost btn-sm" id="addCatBtn">+ Tambah</button>
+        </div>
+      </div>
+
+      <div class="card settings-block">
+        <h4>Shift / Waktu Kerja</h4>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Kode</th><th>Nama Shift</th><th>Jam Mulai</th><th>Jam Selesai</th><th>Durasi (mnt)</th><th>Aksi</th></tr></thead>
+          <tbody id="shiftTableBody"></tbody>
+        </table></div>
+        <button class="btn btn-ghost btn-sm" id="addShiftBtn" style="margin-top:12px;">+ Tambah Shift</button>
+      </div>
+
+      <div class="card settings-block">
+        <h4>Cadangan Data</h4>
+        <p style="font-size:12.5px;color:var(--ink-200);margin-bottom:12px;">Unduh seluruh data sebagai berkas JSON untuk cadangan, atau pulihkan dari berkas cadangan.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-ghost btn-sm" id="exportBtn">⬇ Ekspor Data (JSON)</button>
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer;">⬆ Impor Data<input type="file" id="importFile" accept=".json" style="display:none;"></label>
+          <button class="btn btn-danger btn-sm" id="resetBtn">↺ Reset ke Data Contoh</button>
+        </div>
+      </div>
+    `;
+    renderCatChips(); renderShiftTable();
+
+    document.getElementById('saveCompanyBtn').onclick = ()=>{
+      DB.settings.companyName = document.getElementById('setCompany').value.trim() || DB.settings.companyName;
+      saveDB(); toast('Informasi perusahaan disimpan.');
+    };
+    document.getElementById('saveTargetBtn').onclick = ()=>{
+      DB.settings.oeeTargets = {
+        oee: (parseFloat(document.getElementById('tOee').value)||85)/100,
+        availability: (parseFloat(document.getElementById('tAvail').value)||90)/100,
+        performance: (parseFloat(document.getElementById('tPerf').value)||95)/100,
+        quality: (parseFloat(document.getElementById('tQual').value)||99)/100,
+      };
+      saveDB(); toast('Target OEE disimpan.');
+    };
+    document.getElementById('addCatBtn').onclick = ()=>{
+      const inp = document.getElementById('newCatInput');
+      const v = inp.value.trim();
+      if(!v) return;
+      if(!DB.settings.downtimeCategories.includes(v)) DB.settings.downtimeCategories.push(v);
+      saveDB(); inp.value=''; renderCatChips(); toast('Kategori ditambahkan.');
+    };
+    document.getElementById('addShiftBtn').onclick = ()=>openShiftForm(null);
+    document.getElementById('exportBtn').onclick = ()=>{
+      const blob = new Blob([JSON.stringify(DB,null,2)], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = 'oee-mmi-backup-'+todayStr()+'.json'; a.click();
+    };
+    document.getElementById('importFile').onchange = (e)=>{
+      const file = e.target.files[0]; if(!file) return;
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        try{ const parsed = JSON.parse(reader.result); DB = parsed; saveDB(); toast('Data berhasil dipulihkan.'); draw(); }
+        catch(err){ toast('Berkas tidak valid.', true); }
+      };
+      reader.readAsText(file);
+    };
+    document.getElementById('resetBtn').onclick = ()=>{
+      if(!confirm('Semua data akan diganti dengan data contoh. Lanjutkan?')) return;
+      DB = seedData(); saveDB(); toast('Data direset ke contoh.'); draw();
+    };
+  }
+  function renderCatChips(){
+    document.getElementById('catChips').innerHTML = DB.settings.downtimeCategories.map((c,i)=>
+      `<span class="chip">${escapeHtml(c)}<button data-idx="${i}">✕</button></span>`).join('');
+    document.querySelectorAll('#catChips button').forEach(b=>b.onclick=()=>{
+      DB.settings.downtimeCategories.splice(+b.dataset.idx,1); saveDB(); renderCatChips();
+    });
+  }
+  function renderShiftTable(){
+    document.getElementById('shiftTableBody').innerHTML = DB.shiftMaster.map(s=>`
+      <tr><td>${escapeHtml(s.kode)}</td><td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.jamMulai)}</td><td>${escapeHtml(s.jamSelesai)}</td><td class="num">${fmtNum(s.durasiMenit,0)}</td>
+      <td><div class="row-actions"><button class="icon-btn" data-es="${s.id}">✎</button><button class="icon-btn del" data-ds="${s.id}">🗑</button></div></td></tr>
+    `).join('') || `<tr class="empty-row"><td colspan="6">Belum ada shift.</td></tr>`;
+    document.querySelectorAll('[data-es]').forEach(b=>b.onclick=()=>openShiftForm(b.dataset.es));
+    document.querySelectorAll('[data-ds]').forEach(b=>b.onclick=()=>{
+      if(!confirm('Hapus shift ini?')) return;
+      DB.shiftMaster = DB.shiftMaster.filter(x=>x.id!==b.dataset.ds); saveDB(); renderShiftTable();
+    });
+  }
+  function openShiftForm(id){
+    const editing=!!id; const row = editing? DB.shiftMaster.find(x=>x.id===id) : {};
+    openModal((editing?'Edit ':'Tambah ')+'Shift', `
+      <form id="shiftForm">
+        <div class="form-grid">
+          <div class="field"><label>Kode *</label><input name="kode" value="${escapeHtml(row.kode||'')}" required></div>
+          <div class="field"><label>Nama Shift *</label><input name="nama" value="${escapeHtml(row.nama||'')}" required></div>
+          <div class="field"><label>Jam Mulai *</label><input type="time" name="jamMulai" value="${row.jamMulai||''}" required></div>
+          <div class="field"><label>Jam Selesai *</label><input type="time" name="jamSelesai" value="${row.jamSelesai||''}" required></div>
+          <div class="field full"><label>Durasi (menit) *</label><input type="number" name="durasiMenit" value="${row.durasiMenit??480}" required></div>
+        </div>
+        <div class="form-actions"><button type="button" class="btn btn-ghost" id="cancelShiftBtn">Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
+      </form>`);
+    document.getElementById('cancelShiftBtn').onclick = closeModal;
+    document.getElementById('shiftForm').onsubmit = (e)=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const obj = editing? row : {id:uid()};
+      ['kode','nama','jamMulai','jamSelesai'].forEach(f=>obj[f]=fd.get(f));
+      obj.durasiMenit = parseFloat(fd.get('durasiMenit'))||0;
+      if(!editing) DB.shiftMaster.push(obj);
+      saveDB(); closeModal(); renderShiftTable(); toast('Shift disimpan.');
+    };
+  }
+  draw();
+};
+
+/* =====================================================
+   LOGIN SVG — stylised perfume filling line illustration
+===================================================== */
+function buildLoginSvg(){
+  const svg = document.getElementById('loginSvg');
+  let bottles = '';
+  for(let i=0;i<9;i++){
+    const x = 60 + i*88;
+    bottles += `<g class="bottle" style="animation-delay:${i*0.18}s">
+        <rect x="${x}" y="470" width="34" height="52" rx="3" fill="#8168dd" opacity="0.55"/>
+        <rect x="${x+8}" y="452" width="18" height="20" rx="2" fill="#6a55c4" opacity="0.7"/>
+        <rect x="${x+12}" y="440" width="10" height="14" rx="2" fill="#2f8f89" opacity="0.8"/>
+      </g>`;
+  }
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="floorGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#f6f4fc"/>
+        <stop offset="100%" stop-color="#e9edf3"/>
+      </linearGradient>
+      <linearGradient id="glow" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#6a55c4" stop-opacity="0"/>
+        <stop offset="50%" stop-color="#8168dd" stop-opacity=".45"/>
+        <stop offset="100%" stop-color="#6a55c4" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <rect x="0" y="0" width="900" height="700" fill="url(#floorGrad)"/>
+    <!-- factory silhouette -->
+    <g opacity="0.5">
+      <rect x="0" y="120" width="900" height="300" fill="none"/>
+      <polyline points="0,300 60,230 130,270 210,180 300,250 380,190 470,260 560,200 650,255 740,210 820,250 900,220" fill="none" stroke="#b9b2d8" stroke-width="2"/>
+      <polyline points="0,320 900,320" stroke="#cfc9e4" stroke-width="1"/>
+    </g>
+    <!-- pipes -->
+    <g stroke="#c9c2e2" stroke-width="6" fill="none" opacity="0.8">
+      <path d="M0,150 H900"/>
+      <path d="M120,150 V210"/>
+      <path d="M420,150 V210"/>
+      <path d="M720,150 V210"/>
+    </g>
+    <!-- conveyor belt -->
+    <rect x="20" y="522" width="860" height="14" fill="#e4e0f2" stroke="#c9c2e2" stroke-width="1"/>
+    <g id="beltDashes" fill="none" stroke="#6a55c4" stroke-width="2" stroke-dasharray="10 14" opacity="0.45">
+      <line x1="20" y1="529" x2="880" y2="529"/>
+    </g>
+    <!-- legs -->
+    <rect x="30" y="536" width="10" height="60" fill="#ded9ef"/>
+    <rect x="860" y="536" width="10" height="60" fill="#ded9ef"/>
+    <!-- bottles -->
+    <g id="bottleRow">${bottles}</g>
+    <!-- overhead filling arm -->
+    <g>
+      <rect x="440" y="360" width="20" height="90" fill="#cfc8e6"/>
+      <rect x="410" y="345" width="80" height="18" rx="4" fill="#b7aedb"/>
+      <circle cx="450" cy="450" r="6" fill="#6a55c4"/>
+    </g>
+    <rect x="0" y="600" width="900" height="1" fill="url(#glow)"/>
+    <style>
+      .bottle{animation:bottleMove 5.5s linear infinite;}
+      @keyframes bottleMove{
+        0%{transform:translateX(0);}
+        100%{transform:translateX(-792px);}
+      }
+      @media (prefers-reduced-motion: reduce){ .bottle{animation:none;} }
+    </style>
+  `;
+}
+
+/* =====================================================
+   CLOCK CAPTION
+===================================================== */
+function tickClock(){
+  const el = document.getElementById('clockCaption');
+  if(el) el.textContent = new Date().toLocaleTimeString('id-ID');
+}
+setInterval(tickClock, 1000);
+
+/* =====================================================
+   AUTH
+===================================================== */
+/* =====================================================
+   AUTH — Firebase Authentication (email + password)
+===================================================== */
+function setLoginBusy(busy, label){
+  const btn = document.querySelector('#loginForm button[type="submit"]');
+  if(btn){ btn.disabled = busy; btn.textContent = busy ? (label||'Memproses…') : 'Masuk'; }
+}
+function loginErr(msg){
+  const box = document.getElementById('loginError');
+  box.innerHTML = msg; box.style.display = msg ? 'block' : 'none';
+}
+function authMessage(code){
+  const map = {
+    'auth/invalid-email':'Format email tidak valid.',
+    'auth/user-not-found':'Akun tidak ditemukan.',
+    'auth/wrong-password':'Password salah.',
+    'auth/invalid-credential':'Email atau password salah.',
+    'auth/too-many-requests':'Terlalu banyak percobaan. Coba lagi beberapa saat.',
+    'auth/network-request-failed':'Koneksi jaringan bermasalah.',
+    'auth/weak-password':'Password minimal 6 karakter.',
+    'auth/email-already-in-use':'Email sudah terdaftar.',
+    'auth/operation-not-allowed':'Metode Email/Password belum diaktifkan di Firebase Console.',
+  };
+  return map[code] || ('Gagal masuk ('+code+').');
+}
+
+async function attemptLogin(){
+  const email = document.getElementById('loginUser').value.trim();
+  const pass = document.getElementById('loginPass').value;
+  loginErr('');
+  if(!FB_READY){
+    loginErr('Firebase belum terkonfigurasi. Isi dulu <b>firebase-config.js</b> sesuai panduan.');
+    return;
+  }
+  setLoginBusy(true);
+  try{
+    await fbAuth.signInWithEmailAndPassword(email, pass);
+    // onAuthStateChanged akan melanjutkan proses
+  }catch(err){
+    setLoginBusy(false);
+    loginErr(authMessage(err.code||''));
+  }
+}
+
+/* Dipanggil setelah Firebase Auth memastikan user login. */
+async function onSignedIn(user){
+  try{
+    let profSnap = await fbDb.ref(USERS_PATH+'/'+user.uid).get();
+    let prof = profSnap.exists() ? profSnap.val() : null;
+
+    if(!prof){
+      // Pengguna pertama pada database kosong otomatis menjadi Manager (admin awal).
+      const allSnap = await fbDb.ref(USERS_PATH).get();
+      if(!allSnap.exists()){
+        prof = {email:user.email, nama:user.email.split('@')[0], role:'manager', area:'Produksi'};
+        await fbDb.ref(USERS_PATH+'/'+user.uid).set(prof);
+      }else{
+        await fbAuth.signOut();
+        setLoginBusy(false);
+        loginErr('Akun Anda belum memiliki profil/role. Hubungi Manager untuk didaftarkan.');
+        return;
+      }
+    }
+    SESSION = {uid:user.uid, id:user.uid, email:user.email, nama:prof.nama, role:prof.role, area:prof.area||''};
+    await loadDB();
+    await loadUsers();
+    setLoginBusy(false);
+    showApp();
+  }catch(err){
+    console.error(err);
+    setLoginBusy(false);
+    loginErr('Gagal memuat profil: '+(err.message||err.code));
+  }
+}
+
+function doLogout(){
+  if(FB_READY){ try{ fbDb.ref(DATA_PATH).off(); }catch(e){} fbAuth.signOut(); }
+  SESSION = null;
+  document.getElementById('app').classList.remove('active');
+  document.getElementById('app').innerHTML='';
+  document.getElementById('loginScreen').style.display='flex';
+  document.getElementById('loginForm').reset();
+  setLoginBusy(false);
+  loginErr('');
+}
+
+function showApp(){
+  document.getElementById('loginScreen').style.display='none';
+  const app = document.getElementById('app');
+  app.classList.add('active');
+  renderShell();
+}
+
+function openResetPassword(){
+  const email = document.getElementById('loginUser').value.trim();
+  if(!email){ loginErr('Isi email Anda dulu, lalu klik "Lupa password".'); return; }
+  if(!FB_READY){ loginErr('Firebase belum terkonfigurasi.'); return; }
+  fbAuth.sendPasswordResetEmail(email)
+    .then(()=>{ loginErr('Tautan atur ulang password sudah dikirim ke '+escapeHtml(email)+'.'); })
+    .catch(err=>loginErr(authMessage(err.code||'')));
+}
+
+/* =====================================================
+   BOOTSTRAP
+===================================================== */
+function boot(){
+  buildLoginSvg();
+  tickClock();
+  document.getElementById('loginForm').addEventListener('submit', (e)=>{ e.preventDefault(); attemptLogin(); });
+  const rp = document.getElementById('resetPassLink');
+  if(rp) rp.addEventListener('click', (e)=>{ e.preventDefault(); openResetPassword(); });
+
+  const ok = initFirebase();
+  if(!ok){
+    setConnBadge('local','● Belum terhubung');
+    loginErr('Firebase belum terkonfigurasi. Buka <b>firebase-config.js</b> dan isi konfigurasi proyek Anda (lihat PANDUAN-FIREBASE.md).');
+    DB = seedData(); ensureShape(); snapshotShadow();
+    return;
+  }
+  setConnBadge('connecting','● Menghubungkan…');
+  fbDb.ref('.info/connected').on('value', s=>{
+    setConnBadge(s.val()?'online':'offline', s.val()?'● Online':'● Offline');
+  });
+  fbAuth.onAuthStateChanged(user=>{
+    if(user){ onSignedIn(user); }
+    else{
+      document.getElementById('loginScreen').style.display='flex';
+      document.getElementById('app').classList.remove('active');
+      setLoginBusy(false);
+    }
+  });
+}
+boot();
+
+</script>
+</body>
+</html>
