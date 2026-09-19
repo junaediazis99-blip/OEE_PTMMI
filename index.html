@@ -530,7 +530,7 @@ function diagnose(){
   return d;
 }
 
-function initFirebase(){
+async function initFirebase(){
   FB_DIAG = diagnose();
   if(!FB_DIAG.sdk || !FB_DIAG.cfgFilled || !FB_DIAG.dbUrl){
     console.warn('Firebase belum siap:', FB_DIAG.problems);
@@ -540,6 +540,9 @@ function initFirebase(){
   try{
     fbApp = firebase.apps.length ? firebase.app() : firebase.initializeApp(FB_CONFIG);
     fbAuth = firebase.auth();
+    // Sesi bertahan selama tab ini terbuka (termasuk saat di-refresh),
+    // tapi wajib login ulang bila tab/browser ditutup lalu dibuka lagi.
+    await fbAuth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
     fbDb = firebase.database();
     FB_READY = true;
     return true;
@@ -2444,7 +2447,7 @@ async function openDiagnostics(){
 /* =====================================================
    BOOTSTRAP
 ===================================================== */
-function boot(){
+async function boot(){
   buildLoginSvg();
   tickClock();
   document.getElementById('loginForm').addEventListener('submit', (e)=>{ e.preventDefault(); attemptLogin(); });
@@ -2455,7 +2458,7 @@ function boot(){
   const dl = document.getElementById('diagLink');
   if(dl) dl.addEventListener('click', (e)=>{ e.preventDefault(); openDiagnostics(); });
 
-  const ok = initFirebase();
+  const ok = await initFirebase();
   if(!ok){
     setConnBadge('local','● Belum terhubung');
     const list = FB_DIAG.problems.map(p=>'<li style="margin-top:4px;">'+p+'</li>').join('');

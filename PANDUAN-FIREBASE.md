@@ -109,10 +109,20 @@ Untuk **menghapus** pengguna sepenuhnya, hapus profilnya di menu Pengguna, lalu 
 ## Yang berubah dari versi sebelumnya
 
 - **Login** kini memakai **email + password** Firebase Authentication (bukan username lokal), lengkap dengan fitur **Lupa password** yang mengirim tautan reset ke email.
+- **Sesi login bertahan selama tab tetap terbuka** — me-refresh halaman tidak akan mengeluarkan Anda. Namun begitu tab/browser ditutup lalu dibuka lagi (atau membuka di tab baru), wajib login ulang. Ini pola yang diminta terakhir: aman tapi tidak mengganggu saat refresh.
 - **Data** tersimpan di Realtime Database pada node `data/`, dan **tersinkron realtime** — bila Supervisor menambah input OEE, layar Manager ikut diperbarui otomatis.
 - **Penyimpanan per bagian**: hanya koleksi yang benar-benar berubah yang dikirim ke server (mis. hanya `oeeInput`), bukan seluruh pohon data — lebih hemat kuota dan aman untuk kerja paralel.
 - **Cache lokal**: data terakhir disimpan di browser, jadi aplikasi tetap menampilkan informasi saat koneksi terputus. Indikator **Online / Offline** ada di pojok kanan atas.
 - Menu **Pengaturan → Cadangan Data** tetap bisa dipakai untuk ekspor/impor JSON.
+
+## Cara cepat bila belum terhubung
+
+Sejak pembaruan ini, konfigurasi **tidak harus** lewat berkas. Di halaman login tersedia dua tautan:
+
+- **⚙ Atur koneksi Firebase** — tempelkan objek `firebaseConfig` langsung dari Firebase Console, lalu klik *Simpan & Hubungkan*. Konfigurasi tersimpan di browser tersebut dan aplikasi memuat ulang sendiri. Berguna untuk mencoba cepat, atau bila `firebase-config.js` belum sempat diunggah.
+- **Uji koneksi** — memeriksa satu per satu: SDK termuat, konfigurasi ditemukan & terisi, `databaseURL` valid, dijalankan lewat server web, dan apakah database benar-benar terjangkau. Poin bertanda ❌ menunjukkan persis bagian mana yang perlu diperbaiki.
+
+> Untuk pemakaian bersama banyak pengguna, tetap isi `firebase-config.js` dan unggah ke repo — konfigurasi lewat layar hanya berlaku di browser yang mengisinya.
 
 ## Bila terjadi masalah
 
