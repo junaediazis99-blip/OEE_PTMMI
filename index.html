@@ -454,10 +454,10 @@ table.data-table tbody tr{animation:fadeIn .3s ease both;}
 <!-- ============ LOGIN SCREEN ============ -->
 <div id="loginScreen">
   <div class="login-visual">
-    <div class="brand-mark"><span class="dot"></span> PT MMI · OEE MONITOR</div>
+    <div class="brand-mark"><span class="dot"></span>MMI · OEE MONITOR</div>
     <svg id="loginSvg" viewBox="0 0 900 700" preserveAspectRatio="xMidYMax slice" xmlns="http://www.w3.org/2000/svg"></svg>
     <div class="visual-caption">
-      <span>PRODUCTION LEAN MANUFA SYSTEM</span>
+      <span>LINE FILLING — PARFUM DIVISION</span>
       <span id="clockCaption">--:--:--</span>
     </div>
   </div>
@@ -893,7 +893,49 @@ function groupByPeriod(rows, mode){ // mode: 'day'|'week'|'month'
 
 /* =====================================================
    AI INSIGHT (rule-based, generated from local data — no external API)
+   Analisis berlapis: ringkasan makro -> pembedahan Six Big Losses ->
+   akar masalah per mesin/produk/shift -> tren & stabilitas -> rekomendasi.
 ===================================================== */
+function diagnoseWeakComponent(agg, targets){
+  // Kembalikan komponen (Availability/Performance/Quality) dengan defisit RELATIF terbesar terhadap target.
+  const comp = [
+    {k:'Availability', v:agg.availability, t:targets.availability},
+    {k:'Performance', v:agg.performance, t:targets.performance},
+    {k:'Quality', v:agg.quality, t:targets.quality},
+  ];
+  comp.forEach(c=> c.gap = c.t>0 ? (c.t-c.v)/c.t : 0);
+  comp.sort((a,b)=>b.gap-a.gap);
+  return comp[0];
+}
+function sixBigLossesBreakdown(rows){
+  // Mengubah defisit Availability/Performance/Quality menjadi satuan MENIT yang sepadan,
+  // supaya kerugian dari tiga komponen dapat langsung dibandingkan besarannya.
+  let availLossMin=0, perfLossMin=0, qualLossMin=0, basisMin=0;
+  rows.forEach(r=>{
+    const c = calcOeeRow(r);
+    basisMin += c.netPlanned;
+    availLossMin += (r.downtimeMenit||0);
+    if(c.idealRate>0){
+      const idealMinutesForOutput = (r.totalCount||0)/c.idealRate*60;
+      perfLossMin += Math.max(c.operating - idealMinutesForOutput, 0);
+      qualLossMin += (r.rejectCount||0)/c.idealRate*60;
+    }
+  });
+  const total = availLossMin+perfLossMin+qualLossMin;
+  return {availLossMin, perfLossMin, qualLossMin, total, basisMin};
+}
+function groupAgg(rows, keyFn){
+  const map = {};
+  rows.forEach(r=>{ const k=keyFn(r); (map[k]=map[k]||[]).push(r); });
+  return Object.keys(map).map(k=>({key:k, rows:map[k], agg:aggregateOee(map[k])}));
+}
+function stdDev(arr){
+  if(arr.length<2) return 0;
+  const mean = arr.reduce((a,b)=>a+b,0)/arr.length;
+  const variance = arr.reduce((a,b)=>a+(b-mean)*(b-mean),0)/arr.length;
+  return Math.sqrt(variance);
+}
+
 function generateInsights({from,to}){
   const rows = filterOee({from,to});
   const insights = [];
@@ -904,31 +946,57 @@ function generateInsights({from,to}){
   const agg = aggregateOee(rows);
   const targets = DB.settings.oeeTargets || {oee:0.85,availability:0.9,performance:0.95,quality:0.99};
 
-  // overall vs target
+  /* 1 — Ringkasan makro vs target */
   if(agg.oee < targets.oee){
-    insights.push({type:'bad', ic:'📉', html:`OEE rata-rata periode ini <b>${pct(agg.oee)}</b>, di bawah target <b>${pct(targets.oee)}</b>. Selisih ${pct(targets.oee-agg.oee)} perlu ditutup melalui perbaikan availability/performance/quality.`});
+    insights.push({type:'bad', ic:'📉', html:`OEE rata-rata periode ini <b>${pct(agg.oee)}</b>, di bawah target <b>${pct(targets.oee)}</b> — selisih ${pct(targets.oee-agg.oee)} dari ${fmtNum(rows.length,0)} entri shift.`});
   } else {
-    insights.push({type:'good', ic:'✅', html:`OEE rata-rata periode ini <b>${pct(agg.oee)}</b>, sudah mencapai atau melampaui target <b>${pct(targets.oee)}</b>.`});
+    insights.push({type:'good', ic:'✅', html:`OEE rata-rata periode ini <b>${pct(agg.oee)}</b>, sudah mencapai atau melampaui target <b>${pct(targets.oee)}</b> dari ${fmtNum(rows.length,0)} entri shift.`});
   }
 
-  // weakest of A/P/Q
-  const comp = [{k:'Availability',v:agg.availability,t:targets.availability},{k:'Performance',v:agg.performance,t:targets.performance},{k:'Quality',v:agg.quality,t:targets.quality}];
-  comp.sort((a,b)=>(a.v-a.t)-(b.v-b.t));
-  const weakest = comp[0];
-  if(weakest.v < weakest.t){
-    insights.push({type:'warn', ic:'🎯', html:`Komponen paling tertinggal adalah <b>${weakest.k}</b> (${pct(weakest.v)} vs target ${pct(weakest.t)}). Fokuskan perbaikan di sini untuk kenaikan OEE tercepat.`});
+  /* 2 — Pembedahan Six Big Losses: kuantifikasi kerugian dalam menit */
+  const sbl = sixBigLossesBreakdown(rows);
+  if(sbl.total > 0){
+    const parts = [
+      {k:'Availability Loss (downtime)', v:sbl.availLossMin, ic:'⛔'},
+      {k:'Performance Loss (kecepatan di bawah standar)', v:sbl.perfLossMin, ic:'🐢'},
+      {k:'Quality Loss (reject, disetarakan waktu)', v:sbl.qualLossMin, ic:'🚫'},
+    ].sort((a,b)=>b.v-a.v);
+    const biggest = parts[0];
+    insights.push({type:'bad', ic:'🔎', html:
+      `<b>Pembedahan kerugian (Six Big Losses)</b> dari total ${fmtNum(sbl.basisMin,0)} menit waktu produksi bersih: `
+      + parts.map(p=>`${escapeHtml(p.k)} <b>${fmtNum(p.v,0)} mnt</b> (${pct(sbl.total>0?p.v/sbl.total:0,0)})`).join(' · ')
+      + `. Kontributor terbesar adalah <b>${escapeHtml(biggest.k)}</b> — inilah titik ungkit tertinggi untuk menaikkan OEE.`});
   }
 
-  // per machine comparison
-  const byMesin = {};
-  rows.forEach(r=>{ (byMesin[r.mesinId] = byMesin[r.mesinId]||[]).push(r); });
-  const mesinAgg = Object.keys(byMesin).map(mid=>({mesinId:mid, agg:aggregateOee(byMesin[mid])})).sort((a,b)=>a.agg.oee-b.agg.oee);
+  /* 3 — Per mesin: peringkat + diagnosis akar masalah pada mesin terlemah */
+  const mesinAgg = groupAgg(rows, r=>r.mesinId).sort((a,b)=>a.agg.oee-b.agg.oee);
   if(mesinAgg.length>1){
     const worst = mesinAgg[0], best = mesinAgg[mesinAgg.length-1];
-    insights.push({type:'warn', ic:'🏭', html:`Mesin dengan OEE terendah: <b>${mesinName(worst.mesinId)}</b> (${pct(worst.agg.oee)}), sedangkan tertinggi <b>${mesinName(best.mesinId)}</b> (${pct(best.agg.oee)}). Gap ${pct(best.agg.oee-worst.agg.oee)}.`});
+    const worstWeak = diagnoseWeakComponent(worst.agg, targets);
+    insights.push({type:'warn', ic:'🏭', html:`Mesin dengan OEE terendah: <b>${escapeHtml(mesinName(worst.key))}</b> (${pct(worst.agg.oee)}) — akar masalah utamanya di komponen <b>${worstWeak.k}</b> (${pct(worstWeak.v)} vs target ${pct(worstWeak.t)}). Mesin tertinggi: <b>${escapeHtml(mesinName(best.key))}</b> (${pct(best.agg.oee)}), selisih ${pct(best.agg.oee-worst.agg.oee)}.`});
+  } else if(mesinAgg.length===1){
+    const w = diagnoseWeakComponent(mesinAgg[0].agg, targets);
+    if(w.gap>0.02) insights.push({type:'warn', ic:'🏭', html:`Pada mesin ${escapeHtml(mesinName(mesinAgg[0].key))}, komponen paling tertinggal adalah <b>${w.k}</b> (${pct(w.v)} vs target ${pct(w.t)}).`});
   }
 
-  // downtime pareto
+  /* 4 — Per produk: produk mana yang menyeret OEE turun */
+  const produkAgg = groupAgg(rows, r=>r.produkId).sort((a,b)=>a.agg.oee-b.agg.oee);
+  if(produkAgg.length>1){
+    const worstP = produkAgg[0];
+    const worstPWeak = diagnoseWeakComponent(worstP.agg, targets);
+    insights.push({type:'warn', ic:'🧴', html:`Produk dengan OEE terendah: <b>${escapeHtml(produkName(worstP.key))}</b> (${pct(worstP.agg.oee)}), terutama karena ${worstPWeak.k} (${pct(worstPWeak.v)}). Perlu dicek apakah kapasitas standar produk ini di data master sudah realistis.`});
+  }
+
+  /* 5 — Per shift: pola waktu (mis. shift malam lebih lemah) */
+  const shiftAgg = groupAgg(rows, r=>r.shift).sort((a,b)=>a.agg.oee-b.agg.oee);
+  if(shiftAgg.length>1){
+    const worstS = shiftAgg[0], bestS = shiftAgg[shiftAgg.length-1];
+    if(bestS.agg.oee - worstS.agg.oee > 0.03){
+      insights.push({type:'warn', ic:'🌓', html:`<b>${escapeHtml(worstS.key)}</b> memiliki OEE rata-rata terendah antar shift (${pct(worstS.agg.oee)}, dari ${fmtNum(worstS.rows.length,0)} entri) dibanding <b>${escapeHtml(bestS.key)}</b> (${pct(bestS.agg.oee)}). Pola ini layak ditelusuri — bisa terkait kesiapan mesin, ketersediaan operator, atau serah-terima antar shift.`});
+    }
+  }
+
+  /* 6 — Downtime: Pareto + tren dalam periode */
   const dt = filterDowntime({from,to});
   if(dt.length){
     const byCat = {};
@@ -936,20 +1004,53 @@ function generateInsights({from,to}){
     const sorted = Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
     const totalDt = sorted.reduce((s,x)=>s+x[1],0);
     if(sorted.length){
-      const top = sorted[0];
-      insights.push({type:'bad', ic:'⏱️', html:`Penyebab downtime terbesar: <b>${escapeHtml(top[0])}</b>, menyumbang ${fmtNum(top[1],0)} menit (${pct(top[1]/totalDt)} dari total downtime tercatat).`});
+      const top2 = sorted.slice(0,2);
+      const top2Sum = top2.reduce((s,x)=>s+x[1],0);
+      const namesTop2 = top2.map(x=>escapeHtml(x[0])).join(' & ');
+      insights.push({type:'bad', ic:'⏱️', html:`Downtime didominasi ${sorted.length>1?`2 kategori teratas — <b>${namesTop2}</b>`:`kategori <b>${escapeHtml(sorted[0][0])}</b>`}, menyumbang ${fmtNum(top2Sum,0)} menit (${pct(totalDt>0?top2Sum/totalDt:0,0)} dari total ${fmtNum(totalDt,0)} menit downtime tercatat)${sorted.length>1?' — sesuai prinsip Pareto, menuntaskan dua kategori ini memberi dampak terbesar':''}.`});
+    }
+    // tren: paruh pertama vs kedua periode
+    const datesSorted = [...new Set(dt.map(d=>d.tanggal))].sort();
+    if(datesSorted.length>=4){
+      const mid = datesSorted[Math.floor(datesSorted.length/2)];
+      const firstHalf = dt.filter(d=>d.tanggal<mid).reduce((s,d)=>s+(d.durasiMenit||0),0);
+      const secondHalf = dt.filter(d=>d.tanggal>=mid).reduce((s,d)=>s+(d.durasiMenit||0),0);
+      if(firstHalf>0 && Math.abs(secondHalf-firstHalf)/firstHalf > 0.15){
+        const naik = secondHalf>firstHalf;
+        insights.push({type: naik?'bad':'good', ic: naik?'📈':'📉', html:`Total downtime pada paruh kedua periode ${naik?'meningkat':'menurun'} ${pct(Math.abs(secondHalf-firstHalf)/firstHalf,0)} dibanding paruh pertama (${fmtNum(firstHalf,0)} → ${fmtNum(secondHalf,0)} menit).`});
+      }
     }
   }
 
-  // reject rate
+  /* 7 — Reject rate + produk penyumbang reject terbesar */
   const rejectRate = agg.totalCount>0 ? agg.rejectCount/agg.totalCount : 0;
   if(rejectRate > 0.02){
-    insights.push({type:'bad', ic:'🚫', html:`Reject rate periode ini <b>${pct(rejectRate,2)}</b> (${fmtNum(agg.rejectCount,0)} pcs dari ${fmtNum(agg.totalCount,0)} pcs total produksi), tergolong tinggi dan menekan Quality.`});
+    let worstRejectProduk = null;
+    if(produkAgg.length>1){
+      worstRejectProduk = produkAgg.map(p=>({key:p.key, rate: p.agg.totalCount>0? p.agg.rejectCount/p.agg.totalCount : 0}))
+        .sort((a,b)=>b.rate-a.rate)[0];
+    }
+    insights.push({type:'bad', ic:'🚫', html:`Reject rate periode ini <b>${pct(rejectRate,2)}</b> (${fmtNum(agg.rejectCount,0)} dari ${fmtNum(agg.totalCount,0)} pcs), tergolong tinggi.`
+      + (worstRejectProduk && worstRejectProduk.rate>rejectRate ? ` Penyumbang terbesar: <b>${escapeHtml(produkName(worstRejectProduk.key))}</b> dengan reject rate ${pct(worstRejectProduk.rate,2)}.` : '')});
   } else {
-    insights.push({type:'good', ic:'👍', html:`Reject rate periode ini terjaga di <b>${pct(rejectRate,2)}</b>.`});
+    insights.push({type:'good', ic:'👍', html:`Reject rate periode ini terjaga di <b>${pct(rejectRate,2)}</b>, di bawah ambang 2%.`});
   }
 
-  // trend vs previous period of equal length
+  /* 8 — Stabilitas proses: variasi OEE harian */
+  const dayGroups = groupByPeriod(rows,'day');
+  if(dayGroups.length>=5){
+    const oeeSeries = dayGroups.map(d=>d.agg.oee);
+    const meanOee = oeeSeries.reduce((a,b)=>a+b,0)/oeeSeries.length;
+    const sd = stdDev(oeeSeries);
+    const cv = meanOee>0 ? sd/meanOee : 0;
+    if(cv > 0.15){
+      insights.push({type:'warn', ic:'📊', html:`OEE harian cukup fluktuatif (variasi ±${pct(cv,0)} dari rata-rata ${pct(meanOee)}), menandakan proses belum stabil hari ke hari — perlu distandardisasi (SOP, changeover, ketersediaan material).`});
+    } else {
+      insights.push({type:'good', ic:'📊', html:`OEE harian relatif stabil (variasi ±${pct(cv,0)} dari rata-rata ${pct(meanOee)}).`});
+    }
+  }
+
+  /* 9 — Tren vs periode sebelumnya (rentang sama panjang) */
   const fromD = new Date(from+'T00:00:00'), toD = new Date(to+'T00:00:00');
   const spanDays = Math.round((toD-fromD)/86400000)+1;
   const prevTo = new Date(fromD); prevTo.setDate(prevTo.getDate()-1);
@@ -959,8 +1060,19 @@ function generateInsights({from,to}){
     const prevAgg = aggregateOee(prevRows);
     const delta = agg.oee - prevAgg.oee;
     if(Math.abs(delta) >= 0.01){
-      insights.push({type: delta>0?'good':'bad', ic: delta>0?'📈':'📉', html:`OEE ${delta>0?'naik':'turun'} <b>${pct(Math.abs(delta))}</b> dibanding periode sebelumnya (${pct(prevAgg.oee)} → ${pct(agg.oee)}).`});
+      insights.push({type: delta>0?'good':'bad', ic: delta>0?'📈':'📉', html:`OEE ${delta>0?'naik':'turun'} <b>${pct(Math.abs(delta))}</b> dibanding periode sebelumnya yang setara panjangnya (${pct(prevAgg.oee)} → ${pct(agg.oee)}).`});
     }
+  }
+
+  /* 10 — Rekomendasi konkret berdasarkan temuan terbesar */
+  if(sbl.total > 0){
+    const parts2 = [
+      {k:'downtime/breakdown', v:sbl.availLossMin, action:'menelusuri kategori downtime terbesar dan menjadwalkan preventive maintenance'},
+      {k:'kecepatan produksi (performance)', v:sbl.perfLossMin, action:'meninjau kapasitas standar di data master dan mengecek penyebab kecepatan aktual di bawah standar'},
+      {k:'kualitas/reject', v:sbl.qualLossMin, action:'melakukan root-cause reject dan memperketat titik kontrol kualitas'},
+    ].sort((a,b)=>b.v-a.v);
+    const rec = parts2[0];
+    insights.push({type:'warn', ic:'💡', html:`<b>Rekomendasi:</b> karena kerugian terbesar berasal dari ${escapeHtml(rec.k)}, prioritaskan tindakan dengan ${escapeHtml(rec.action)}. Ini berpotensi memberi kenaikan OEE tercepat dibanding memperbaiki komponen lain terlebih dulu.`});
   }
 
   return insights;
