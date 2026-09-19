@@ -480,10 +480,17 @@ table.data-table tbody tr{animation:fadeIn .3s ease both;}
       <a href="#" id="resetPassLink">Lupa password?</a>
       <span class="conn-badge connecting" id="loginConn">● Menghubungkan…</span>
     </div>
+    <div class="login-foot" style="border-top:none; padding-top:10px; margin-top:0;">
+      <a href="#" id="cfgLink">⚙ Atur koneksi Firebase</a>
+      <a href="#" id="diagLink">Uji koneksi</a>
+    </div>
   </div>
 </div>
 
 <div id="app"></div>
+<div id="modalRoot"></div>
+<div class="toast-wrap" id="toastWrap"></div>
+<div id="printArea"></div>
 
 <script>
 /* =====================================================
@@ -493,23 +500,54 @@ const CACHE_KEY = 'oee_mmi_cache_v2';   // cache lokal (offline fallback)
 const DATA_PATH = 'data';               // node data aplikasi di Realtime Database
 const USERS_PATH = 'users';             // node profil & role user (key = UID Firebase Auth)
 
-let fbApp=null, fbAuth=null, fbDb=null, FB_READY=false;
+const CFG_KEY = 'oee_mmi_fbconfig_v1';   // konfigurasi yang diisi lewat layar (cadangan firebase-config.js)
+let fbApp=null, fbAuth=null, fbDb=null, FB_READY=false, FB_CONFIG=null, FB_DIAG=null;
+
+function readSavedConfig(){
+  try{ const raw = localStorage.getItem(CFG_KEY); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
+}
+function isPlaceholder(cfg){
+  return !cfg || !cfg.apiKey || String(cfg.apiKey).indexOf('GANTI')===0;
+}
+
+/* Mendeteksi penyebab pasti bila koneksi gagal, bukan sekadar "belum terkonfigurasi". */
+function diagnose(){
+  const d = {sdk:false, cfgFile:false, cfgFilled:false, dbUrl:false, saved:false, protocol:location.protocol, problems:[]};
+  d.sdk = (typeof firebase !== 'undefined' && !!firebase.initializeApp);
+  d.cfgFile = (typeof FIREBASE_CONFIG !== 'undefined' && FIREBASE_CONFIG !== null);
+  const saved = readSavedConfig();
+  d.saved = !!saved && !isPlaceholder(saved);
+  const cfg = d.saved ? saved : (d.cfgFile ? FIREBASE_CONFIG : null);
+  d.cfgFilled = !isPlaceholder(cfg);
+  d.dbUrl = !!(cfg && cfg.databaseURL && String(cfg.databaseURL).indexOf('GANTI')<0 && /^https:\/\//.test(cfg.databaseURL));
+  d.config = cfg;
+
+  if(!d.sdk) d.problems.push('SDK Firebase tidak termuat. Periksa koneksi internet, atau jaringan/pemblokir yang menutup akses ke <code>gstatic.com</code>.');
+  if(!d.cfgFile && !d.saved) d.problems.push('Berkas <code>firebase-config.js</code> tidak ditemukan di folder yang sama dengan <code>index.html</code> (biasanya lupa diunggah ke repo, atau nama berkasnya berbeda).');
+  else if(!d.cfgFilled) d.problems.push('Konfigurasi masih berisi teks contoh <code>GANTI_…</code> — belum diisi dengan data proyek Firebase Anda.');
+  else if(!d.dbUrl) d.problems.push('Bagian <code>databaseURL</code> kosong atau salah. Salin dari Firebase Console → Realtime Database (bentuknya <code>https://…firebasedatabase.app</code>).');
+  if(d.protocol === 'file:') d.problems.push('Halaman dibuka langsung sebagai berkas (<code>file://</code>). Firebase Authentication menolak mode ini — jalankan lewat server, misalnya <code>python -m http.server 8000</code>, lalu buka <code>http://localhost:8000</code>.');
+  return d;
+}
+
 function initFirebase(){
-  if(typeof firebase==='undefined' || typeof FIREBASE_CONFIG==='undefined'){
-    console.warn('Firebase SDK / konfigurasi belum tersedia — aplikasi berjalan mode lokal.');
+  FB_DIAG = diagnose();
+  if(!FB_DIAG.sdk || !FB_DIAG.cfgFilled || !FB_DIAG.dbUrl){
+    console.warn('Firebase belum siap:', FB_DIAG.problems);
     return false;
   }
-  if(!FIREBASE_CONFIG.apiKey || FIREBASE_CONFIG.apiKey.indexOf('GANTI')===0){
-    console.warn('firebase-config.js belum diisi — aplikasi berjalan mode lokal.');
-    return false;
-  }
+  FB_CONFIG = FB_DIAG.config;
   try{
-    fbApp = firebase.apps.length ? firebase.app() : firebase.initializeApp(FIREBASE_CONFIG);
+    fbApp = firebase.apps.length ? firebase.app() : firebase.initializeApp(FB_CONFIG);
     fbAuth = firebase.auth();
     fbDb = firebase.database();
     FB_READY = true;
     return true;
-  }catch(e){ console.error('Gagal inisialisasi Firebase:', e); return false; }
+  }catch(e){
+    console.error('Gagal inisialisasi Firebase:', e);
+    FB_DIAG.problems.push('Firebase menolak konfigurasi: <code>'+escapeHtml(e.message||e.code)+'</code>');
+    return false;
+  }
 }
 function setConnBadge(state, text){
   const el = document.getElementById('connBadge');
@@ -994,9 +1032,6 @@ function renderShell(){
       </div>
       <div class="main-content" id="mainContent"></div>
     </div>
-    <div id="modalRoot"></div>
-    <div class="toast-wrap" id="toastWrap"></div>
-    <div id="printArea"></div>
   `;
   buildNav();
   document.getElementById('userAva').textContent = (SESSION.nama||'?').charAt(0).toUpperCase();
@@ -1334,7 +1369,7 @@ PAGE_RENDERERS.users = function(mount){
       const btn = document.getElementById('ncSubmit'); btn.disabled=true; btn.textContent='Membuat…';
       try{
         // app sekunder agar sesi login manager tidak tergantikan akun baru
-        const secondary = firebase.apps.find(a=>a.name==='secondary') || firebase.initializeApp(FIREBASE_CONFIG,'secondary');
+        const secondary = firebase.apps.find(a=>a.name==='secondary') || firebase.initializeApp(FB_CONFIG,'secondary');
         const cred = await secondary.auth().createUserWithEmailAndPassword(fd.get('email'), fd.get('password'));
         await saveUserProfile(cred.user.uid, {email:fd.get('email'), nama:fd.get('nama'), role:fd.get('role'), area:fd.get('area')||''});
         await secondary.auth().signOut();
@@ -2122,6 +2157,94 @@ function openResetPassword(){
 }
 
 /* =====================================================
+   PENGATURAN KONEKSI FIREBASE (dari layar, tanpa edit berkas)
+===================================================== */
+function parseFirebaseConfig(text){
+  // menerima tempelan mentah dari Firebase Console, baik objek JS maupun JSON
+  const keys = ['apiKey','authDomain','databaseURL','projectId','storageBucket','messagingSenderId','appId','measurementId'];
+  const out = {};
+  keys.forEach(k=>{
+    const m = text.match(new RegExp('["\\\']?'+k+'["\\\']?\\s*:\\s*["\\\']([^"\\\']+)["\\\']'));
+    if(m) out[k] = m[1].trim();
+  });
+  return out;
+}
+function openConfigModal(){
+  const cur = readSavedConfig() || (typeof FIREBASE_CONFIG !== 'undefined' ? FIREBASE_CONFIG : {});
+  const pretty = isPlaceholder(cur) ? '' : JSON.stringify(cur, null, 2);
+  openModal('Atur Koneksi Firebase', `
+    <p style="font-size:13px;color:var(--ink-200);line-height:1.6;margin-bottom:14px;">
+      Tempelkan objek <b>firebaseConfig</b> dari Firebase Console
+      (Project settings → Your apps → Config). Konfigurasi disimpan di browser ini,
+      sehingga aplikasi tetap terhubung walau berkas <code>firebase-config.js</code> belum diisi.
+    </p>
+    <div class="field">
+      <label>KONFIGURASI FIREBASE</label>
+      <textarea id="cfgText" rows="10" style="width:100%;background:var(--ink-850);border:1px solid var(--ink-700);color:var(--paper);padding:11px 13px;border-radius:4px;font-family:var(--font-mono);font-size:12px;resize:vertical;" placeholder='{\n  "apiKey": "AIza...",\n  "authDomain": "oee-mmi.firebaseapp.com",\n  "databaseURL": "https://oee-mmi-default-rtdb.asia-southeast1.firebasedatabase.app",\n  "projectId": "oee-mmi",\n  "storageBucket": "oee-mmi.appspot.com",\n  "messagingSenderId": "1234567890",\n  "appId": "1:1234567890:web:abc"\n}'>${escapeHtml(pretty)}</textarea>
+    </div>
+    <div id="cfgMsg" style="font-size:12.5px;line-height:1.55;margin-top:4px;"></div>
+    <div class="form-actions">
+      ${readSavedConfig()?`<button type="button" class="btn btn-ghost" id="cfgClear">Hapus Konfigurasi</button>`:''}
+      <button type="button" class="btn btn-ghost" id="cfgCancel">Batal</button>
+      <button type="button" class="btn btn-primary" id="cfgSave">Simpan &amp; Hubungkan</button>
+    </div>`, {wide:true});
+  document.getElementById('cfgCancel').onclick = closeModal;
+  const clr = document.getElementById('cfgClear');
+  if(clr) clr.onclick = ()=>{ localStorage.removeItem(CFG_KEY); location.reload(); };
+  document.getElementById('cfgSave').onclick = ()=>{
+    const msg = document.getElementById('cfgMsg');
+    const cfg = parseFirebaseConfig(document.getElementById('cfgText').value);
+    const missing = ['apiKey','authDomain','databaseURL','projectId','appId'].filter(k=>!cfg[k]);
+    if(missing.length){
+      msg.innerHTML = '<span style="color:var(--bad)">Belum lengkap — bagian berikut tidak terbaca: <b>'+missing.join(', ')+'</b>. Salin ulang seluruh objek dari Firebase Console.</span>';
+      return;
+    }
+    if(!/^https:\/\/.+firebasedatabase\.app|^https:\/\/.+firebaseio\.com/.test(cfg.databaseURL)){
+      msg.innerHTML = '<span style="color:var(--bad)">Format <b>databaseURL</b> tidak dikenali. Salin dari halaman Realtime Database.</span>';
+      return;
+    }
+    localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+    msg.innerHTML = '<span style="color:var(--good)">Tersimpan. Memuat ulang aplikasi…</span>';
+    setTimeout(()=>location.reload(), 700);
+  };
+}
+
+/* Uji koneksi: memeriksa SDK, konfigurasi, jangkauan database, dan status Auth */
+async function openDiagnostics(){
+  const d = diagnose();
+  const line = (ok, label, detail)=>`<div style="display:flex;gap:9px;padding:8px 0;border-bottom:1px solid var(--ink-800);font-size:13px;">
+      <span style="flex-shrink:0">${ok?'✅':'❌'}</span><div><b>${label}</b>${detail?`<div style="color:var(--ink-200);font-size:12.3px;margin-top:2px;">${detail}</div>`:''}</div></div>`;
+  openModal('Uji Koneksi', `<div id="diagBody">
+      ${line(d.sdk,'SDK Firebase termuat', d.sdk?'':'Tidak dapat mengunduh SDK dari gstatic.com.')}
+      ${line(d.cfgFile||d.saved,'Konfigurasi ditemukan', d.saved?'Sumber: disimpan di browser ini.':(d.cfgFile?'Sumber: berkas firebase-config.js':'Berkas firebase-config.js tidak termuat.'))}
+      ${line(d.cfgFilled,'Konfigurasi sudah diisi', d.cfgFilled?('Project ID: <code>'+escapeHtml(d.config.projectId||'–')+'</code>'):'Masih berisi teks contoh GANTI_…')}
+      ${line(d.dbUrl,'databaseURL valid', d.config&&d.config.databaseURL?('<code>'+escapeHtml(d.config.databaseURL)+'</code>'):'Belum terisi.')}
+      ${line(d.protocol!=='file:','Dijalankan lewat server web', d.protocol==='file:'?'Halaman dibuka sebagai file:// — Firebase Auth akan menolak.':('Protokol: '+d.protocol))}
+      <div id="diagLive" style="padding:10px 0;font-size:13px;color:var(--ink-200);">⏳ Menguji sambungan ke database…</div>
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn btn-ghost" id="diagCfg">⚙ Atur Konfigurasi</button>
+      <button type="button" class="btn btn-primary" id="diagClose">Tutup</button>
+    </div>`, {wide:true});
+  document.getElementById('diagClose').onclick = closeModal;
+  document.getElementById('diagCfg').onclick = ()=>{ closeModal(); openConfigModal(); };
+
+  const live = document.getElementById('diagLive');
+  if(!FB_READY){ live.innerHTML = '❌ <b>Sambungan database belum dapat diuji</b> — perbaiki dulu poin bertanda ❌ di atas.'; return; }
+  try{
+    const t = setTimeout(()=>{ live.innerHTML='⚠️ <b>Belum ada balasan dari database</b> — periksa databaseURL dan Rules.'; }, 6000);
+    await fbDb.ref('.info/serverTimeOffset').get();
+    clearTimeout(t);
+    live.innerHTML = '✅ <b>Database terjangkau.</b> Silakan masuk memakai akun Firebase Anda.';
+  }catch(err){
+    const perm = (err.code==='PERMISSION_DENIED' || /permission/i.test(err.message||''));
+    live.innerHTML = perm
+      ? '⚠️ <b>Database terjangkau, tetapi akses ditolak.</b> Ini normal sebelum login — pastikan Rules sudah di-publish, lalu coba masuk.'
+      : ('❌ <b>Gagal menjangkau database:</b> '+escapeHtml(err.message||err.code));
+  }
+}
+
+/* =====================================================
    BOOTSTRAP
 ===================================================== */
 function boot(){
@@ -2130,11 +2253,17 @@ function boot(){
   document.getElementById('loginForm').addEventListener('submit', (e)=>{ e.preventDefault(); attemptLogin(); });
   const rp = document.getElementById('resetPassLink');
   if(rp) rp.addEventListener('click', (e)=>{ e.preventDefault(); openResetPassword(); });
+  const cl = document.getElementById('cfgLink');
+  if(cl) cl.addEventListener('click', (e)=>{ e.preventDefault(); openConfigModal(); });
+  const dl = document.getElementById('diagLink');
+  if(dl) dl.addEventListener('click', (e)=>{ e.preventDefault(); openDiagnostics(); });
 
   const ok = initFirebase();
   if(!ok){
     setConnBadge('local','● Belum terhubung');
-    loginErr('Firebase belum terkonfigurasi. Buka <b>firebase-config.js</b> dan isi konfigurasi proyek Anda (lihat PANDUAN-FIREBASE.md).');
+    const list = FB_DIAG.problems.map(p=>'<li style="margin-top:4px;">'+p+'</li>').join('');
+    loginErr('<b>Belum terhubung ke Firebase.</b><ul style="margin:8px 0 8px 18px;padding:0;">'+list+'</ul>'
+      + 'Cara tercepat: klik <b>⚙ Atur koneksi Firebase</b> di bawah, lalu tempelkan konfigurasi dari Firebase Console.');
     DB = seedData(); ensureShape(); snapshotShadow();
     return;
   }
