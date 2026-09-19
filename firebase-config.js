@@ -18,7 +18,6 @@
 const firebaseConfig = {
   apiKey: "AIzaSyAxiLpE8LA-VYdykAH4vUMTWK2Tx_GjdtE",
   authDomain: "oee-mmi.firebaseapp.com",
- databaseURL: "https://oee-mmi-default-rtdb.asia-southeast1.firebasedatabase.app/",
   projectId: "oee-mmi",
   storageBucket: "oee-mmi.firebasestorage.app",
   messagingSenderId: "97915071019",
