@@ -23,7 +23,7 @@
      pilih "Config" — lalu salin nilainya ke bawah ini, ganti teks GANTI_....
 ===================================================== -->
 <script>
-   const firebaseConfig = {
+  const firebaseConfig = {
   apiKey: "AIzaSyAxiLpE8LA-VYdykAH4vUMTWK2Tx_GjdtE",
   authDomain: "oee-mmi.firebaseapp.com",
   databaseURL: "https://oee-mmi-default-rtdb.asia-southeast1.firebasedatabase.app",
@@ -689,9 +689,29 @@ function seedData(){
     {id:uid(), nama:'Briefing & Cleaning Awal Shift', durasiMenit:15, aktif:true},
   ];
 
+  // Contoh data WIP (barang setengah jadi): beberapa produksi WIP + sebagian dikonversi ke barang jadi
+  const wipProduction = [];
+  const wipConversion = [];
+  for(let d=9; d>=0; d--){
+    const dt = new Date(); dt.setDate(dt.getDate()-d);
+    const ds = dt.toISOString().slice(0,10);
+    const mesinId = mesinIds[Math.floor(Math.random()*mesinIds.length)];
+    const produkId = produkIds[Math.floor(Math.random()*produkIds.length)];
+    const jumlah = Math.round(80 + Math.random()*160);
+    const waktuMenit = Math.round(45 + Math.random()*60);
+    wipProduction.push({id:uid(), tanggal:ds, shift: shiftMaster[d%3].nama, mesinId, produkId, jumlah, waktuMenit, keterangan:''});
+    if(Math.random()<0.6){
+      wipConversion.push({
+        id:uid(), tanggal:ds, shift: shiftMaster[d%3].nama,
+        mesinId: mesinIds[Math.floor(Math.random()*mesinIds.length)], produkId,
+        jumlah: Math.round(jumlah*(0.3+Math.random()*0.5)), keterangan:''
+      });
+    }
+  }
+
   return {
     users: [],
-    produk, mesin, operator, kapasitas, shiftMaster, oeeInput, downtime,
+    produk, mesin, operator, kapasitas, shiftMaster, oeeInput, downtime, wipProduction, wipConversion,
     settings:{
       companyName:'PT MMI — Maklon & Manufaktur Parfum',
       downtimeCategories,
@@ -703,7 +723,7 @@ function seedData(){
 
 let DB = null;
 let SESSION = null;
-const DATA_COLLS = ['produk','mesin','operator','kapasitas','shiftMaster','oeeInput','downtime','settings'];
+const DATA_COLLS = ['produk','mesin','operator','kapasitas','shiftMaster','oeeInput','downtime','wipProduction','wipConversion','settings'];
 let _shadow = {};          // snapshot terakhir tiap koleksi -> dipakai menulis per-bagian saja
 let _suppressSync = false; // cegah re-render saat perubahan berasal dari tulisan kita sendiri
 
@@ -855,9 +875,28 @@ function calcShiftDurationMinutes(jamMulai, jamSelesai){
   return end-start;
 }
 /* Menghitung kecepatan pengerjaan barang WIP (pcs/jam) dari hasil WIP & waktu pengerjaannya. */
-function calcWipRate(row){
-  if(!row || !row.wipMenit || row.wipMenit<=0 || !row.wipCount) return null;
-  return row.wipCount/(row.wipMenit/60);
+function calcRatePerJam(count, menit){
+  if(!menit || menit<=0 || !count) return null;
+  return count/(menit/60);
+}
+/* Stok WIP (barang setengah jadi) yang tersedia untuk dikonversi menjadi barang jadi,
+   dihitung per produk: total diproduksi dikurangi total yang sudah dikonversi. */
+function wipProducedTotal(produkId){
+  return (DB.wipProduction||[]).filter(w=>w.produkId===produkId).reduce((s,w)=>s+(w.jumlah||0),0);
+}
+function wipConvertedTotal(produkId){
+  return (DB.wipConversion||[]).filter(w=>w.produkId===produkId).reduce((s,w)=>s+(w.jumlah||0),0);
+}
+function wipStock(produkId){
+  return wipProducedTotal(produkId) - wipConvertedTotal(produkId);
+}
+function wipStockAllProduk(){
+  return DB.produk.map(p=>({
+    produkId:p.id, produk:p,
+    diproduksi: wipProducedTotal(p.id),
+    dikonversi: wipConvertedTotal(p.id),
+    sisa: wipStock(p.id),
+  })).filter(x=>x.diproduksi>0 || x.dikonversi>0);
 }
 /* Total menit "stop yang diizinkan" per shift — berlaku untuk SEMUA mesin & produk
    (mis. istirahat/sholat, briefing awal shift). Ini BUKAN downtime: mengurangi
@@ -1599,6 +1638,8 @@ PAGE_RENDERERS.oeeInput = function(mount){
   function renderTabs(){
     return `<div class="tabs">
       <button class="tab-btn ${activeTab==='produksi'?'active':''}" data-tab="produksi">Input Produksi</button>
+      <button class="tab-btn ${activeTab==='wipProduksi'?'active':''}" data-tab="wipProduksi">Produksi WIP</button>
+      <button class="tab-btn ${activeTab==='wipKonversi'?'active':''}" data-tab="wipKonversi">Konversi WIP → Barang Jadi</button>
       <button class="tab-btn ${activeTab==='waktuKerja'?'active':''}" data-tab="waktuKerja">Waktu Kerja</button>
       <button class="tab-btn ${activeTab==='waktuStop'?'active':''}" data-tab="waktuStop">Waktu Stop Diizinkan</button>
     </div>`;
@@ -1623,7 +1664,7 @@ PAGE_RENDERERS.oeeInput = function(mount){
         ${canEdit?`<button class="btn btn-primary btn-sm" id="addOeeBtn">+ Tambah Input</button>`:''}
       </div>
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Tanggal</th><th>Shift</th><th>Mesin</th><th>Produk</th><th>Operator</th><th>Planned (mnt)</th><th>Net Planned</th><th>Downtime (mnt)</th><th>Total (pcs)</th><th>Reject (pcs)</th><th>Hasil WIP (pcs)</th><th>Kecepatan WIP (pcs/jam)</th><th>OEE</th><th>Aksi</th></tr></thead>
+        <thead><tr><th>Tanggal</th><th>Shift</th><th>Mesin</th><th>Produk</th><th>Operator</th><th>Planned (mnt)</th><th>Net Planned</th><th>Downtime (mnt)</th><th>Total (pcs)</th><th>Reject (pcs)</th><th>OEE</th><th>Aksi</th></tr></thead>
         <tbody id="oeeTableBody"></tbody>
       </table></div>
     `;
@@ -1638,7 +1679,6 @@ PAGE_RENDERERS.oeeInput = function(mount){
     const body = rows.length ? rows.map(r=>{
       const c = calcOeeRow(r);
       const cls = c.oee>=0.85?'good':(c.oee>=0.65?'warn':'bad');
-      const wipRate = calcWipRate(r);
       return `<tr>
         <td>${fmtDate(r.tanggal)}</td>
         <td>${escapeHtml(r.shift)}</td>
@@ -1650,14 +1690,12 @@ PAGE_RENDERERS.oeeInput = function(mount){
         <td class="num">${fmtNum(r.downtimeMenit,0)}</td>
         <td class="num">${fmtNum(r.totalCount,0)}</td>
         <td class="num">${fmtNum(r.rejectCount,0)}</td>
-        <td class="num">${fmtNum(r.wipCount||0,0)}</td>
-        <td class="num">${wipRate!==null? fmtNum(wipRate,1) : '–'}</td>
         <td><span class="pill ${cls}">${pct(c.oee)}</span></td>
         <td><div class="row-actions">
           ${canEdit?`<button class="icon-btn" data-edit="${r.id}" title="Edit">✎</button><button class="icon-btn del" data-del="${r.id}" title="Hapus">🗑</button>`:''}
         </div></td>
       </tr>`;
-    }).join('') : `<tr class="empty-row"><td colspan="14">Tidak ada data pada filter ini.</td></tr>`;
+    }).join('') : `<tr class="empty-row"><td colspan="12">Tidak ada data pada filter ini.</td></tr>`;
     document.getElementById('oeeTableBody').innerHTML = body;
     document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openForm(b.dataset.edit));
     document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
@@ -1691,13 +1729,8 @@ PAGE_RENDERERS.oeeInput = function(mount){
           <div class="field"><label>Total Downtime (menit) *</label><input type="number" name="downtimeMenit" value="${row.downtimeMenit??0}" required></div>
           <div class="field"><label>Total Produksi (pcs) *</label><input type="number" name="totalCount" value="${row.totalCount??0}" required></div>
           <div class="field"><label>Reject (pcs) *</label><input type="number" name="rejectCount" value="${row.rejectCount??0}" required></div>
-          <div class="field"><label>Hasil Produk WIP (pcs)</label><input type="number" name="wipCount" id="oeeWipCount" value="${row.wipCount??0}"></div>
-          <div class="field"><label>Waktu Pengerjaan WIP (menit)</label><input type="number" name="wipMenit" id="oeeWipMenit" value="${row.wipMenit??0}"></div>
-          <div class="field full" style="background:var(--ink-850);border-radius:6px;padding:9px 12px;margin-top:-4px;">
-            <span style="font-size:12px;color:var(--ink-200);">🧮 Kecepatan pengerjaan WIP: <b id="wipRateDisplay">${(()=>{const wr=calcWipRate(row); return wr!==null?fmtNum(wr,1)+' pcs/jam':'–';})()}</b> (dihitung otomatis dari Hasil WIP ÷ Waktu Pengerjaan WIP)</span>
-          </div>
           <div class="field full" style="background:var(--ink-850);border-radius:6px;padding:9px 12px;">
-            <span style="font-size:12px;color:var(--ink-200);">ℹ️ ${fmtNum(totalAllowedStopMinutes(),0)} menit/shift waktu stop yang diizinkan (tab "Waktu Stop Diizinkan") otomatis dikurangi dari Planned Time — <b>bukan</b> downtime, tidak perlu dimasukkan ke kolom Total Downtime.</span>
+            <span style="font-size:12px;color:var(--ink-200);">ℹ️ ${fmtNum(totalAllowedStopMinutes(),0)} menit/shift waktu stop yang diizinkan (tab "Waktu Stop Diizinkan") otomatis dikurangi dari Planned Time — <b>bukan</b> downtime, tidak perlu dimasukkan ke kolom Total Downtime. Hasil WIP dicatat terpisah di tab "Produksi WIP".</span>
           </div>
           <div class="field full"><label>Catatan</label><input type="text" name="catatan" value="${escapeHtml(row.catatan||'')}"></div>
         </div>
@@ -1714,23 +1747,186 @@ PAGE_RENDERERS.oeeInput = function(mount){
       const durasi = opt ? parseFloat(opt.dataset.durasi)||0 : 0;
       document.getElementById('oeePlannedInput').value = durasi;
     };
-    // Kecepatan WIP dihitung live saat Hasil WIP / Waktu Pengerjaan WIP diubah
-    function updateWipRate(){
-      const wc = parseFloat(document.getElementById('oeeWipCount').value)||0;
-      const wm = parseFloat(document.getElementById('oeeWipMenit').value)||0;
-      const disp = document.getElementById('wipRateDisplay');
-      disp.textContent = (wm>0 && wc>0) ? fmtNum(wc/(wm/60),1)+' pcs/jam' : '–';
-    }
-    document.getElementById('oeeWipCount').oninput = updateWipRate;
-    document.getElementById('oeeWipMenit').oninput = updateWipRate;
     document.getElementById('oeeForm').onsubmit = (e)=>{
       e.preventDefault();
       const fd = new FormData(e.target);
       const obj = editing ? row : {id:uid()};
       ['tanggal','shift','mesinId','produkId','operatorId','catatan'].forEach(f=> obj[f]=fd.get(f));
-      ['plannedTimeMenit','downtimeMenit','totalCount','rejectCount','wipCount','wipMenit'].forEach(f=> obj[f]=parseFloat(fd.get(f))||0);
+      ['plannedTimeMenit','downtimeMenit','totalCount','rejectCount'].forEach(f=> obj[f]=parseFloat(fd.get(f))||0);
       if(!editing) DB.oeeInput.push(obj);
       saveDB(); closeModal(); renderTable(); toast(editing?'Perubahan disimpan.':'Data OEE ditambahkan.');
+    };
+  }
+
+  /* ---------- Kartu ringkasan Stok WIP (dipakai di 2 tab WIP) ---------- */
+  function stockSummaryCardHtml(){
+    const rows = wipStockAllProduk();
+    return `<div class="card" style="margin-bottom:16px;">
+      <div class="card-title">Stok WIP per Produk <span class="hint">Diproduksi − Dikonversi = Sisa Stok</span></div>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Produk</th><th>Diproduksi (pcs)</th><th>Dikonversi (pcs)</th><th>Sisa Stok WIP (pcs)</th></tr></thead>
+        <tbody>${rows.length? rows.map(r=>`<tr>
+            <td>${escapeHtml(r.produk.kode)} — ${escapeHtml(r.produk.nama)}</td>
+            <td class="num">${fmtNum(r.diproduksi,0)}</td>
+            <td class="num">${fmtNum(r.dikonversi,0)}</td>
+            <td class="num"><span class="pill ${r.sisa>0?'warn':''}">${fmtNum(r.sisa,0)}</span></td>
+          </tr>`).join('') : `<tr class="empty-row"><td colspan="4">Belum ada data WIP.</td></tr>`}</tbody>
+      </table></div>
+    </div>`;
+  }
+
+  /* ---------- TAB: Produksi WIP (terkait mesin & produk tertentu) ---------- */
+  function drawWipProduksi(mount){
+    mount.innerHTML += stockSummaryCardHtml() + `
+      <div class="toolbar">
+        <div class="toolbar-left"><span class="pill">${(DB.wipProduction||[]).length} data</span></div>
+        ${canEdit?`<button class="btn btn-primary btn-sm" id="addWipProdBtn">+ Tambah Produksi WIP</button>`:''}
+      </div>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Tanggal</th><th>Shift</th><th>Mesin</th><th>Produk</th><th>Jumlah WIP (pcs)</th><th>Waktu Pengerjaan (mnt)</th><th>Kecepatan (pcs/jam)</th><th>Keterangan</th><th>Aksi</th></tr></thead>
+        <tbody id="wipProdTableBody"></tbody>
+      </table></div>
+    `;
+    renderWipProdTable();
+    if(canEdit) document.getElementById('addWipProdBtn').onclick = ()=>openWipProdForm(null);
+  }
+  function renderWipProdTable(){
+    const rows = (DB.wipProduction||[]).slice().sort((a,b)=>b.tanggal.localeCompare(a.tanggal));
+    document.getElementById('wipProdTableBody').innerHTML = rows.length ? rows.map(r=>{
+      const rate = calcRatePerJam(r.jumlah, r.waktuMenit);
+      return `<tr>
+        <td>${fmtDate(r.tanggal)}</td>
+        <td>${escapeHtml(r.shift||'–')}</td>
+        <td>${escapeHtml(mesinName(r.mesinId))}</td>
+        <td>${escapeHtml(produkName(r.produkId))}</td>
+        <td class="num">${fmtNum(r.jumlah,0)}</td>
+        <td class="num">${fmtNum(r.waktuMenit,0)}</td>
+        <td class="num">${rate!==null?fmtNum(rate,1):'–'}</td>
+        <td>${escapeHtml(r.keterangan||'–')}</td>
+        <td><div class="row-actions">${canEdit?`<button class="icon-btn" data-ewp="${r.id}">✎</button><button class="icon-btn del" data-dwp="${r.id}">🗑</button>`:''}</div></td>
+      </tr>`;
+    }).join('') : `<tr class="empty-row"><td colspan="9">Belum ada data produksi WIP.</td></tr>`;
+    document.querySelectorAll('[data-ewp]').forEach(b=>b.onclick=()=>openWipProdForm(b.dataset.ewp));
+    document.querySelectorAll('[data-dwp]').forEach(b=>b.onclick=()=>{
+      if(!confirm('Hapus data produksi WIP ini? Sisa stok WIP produk terkait akan ikut berkurang.')) return;
+      DB.wipProduction = DB.wipProduction.filter(x=>x.id!==b.dataset.dwp);
+      saveDB(); renderWipProdTable(); toast('Data dihapus.');
+    });
+  }
+  function openWipProdForm(id){
+    const editing = !!id;
+    const row = editing ? DB.wipProduction.find(x=>x.id===id) : {tanggal:todayStr(), shift:DB.shiftMaster[0]?.nama||''};
+    openModal((editing?'Edit ':'Tambah ')+'Produksi WIP', `
+      <form id="wipProdForm">
+        <div class="form-grid">
+          <div class="field"><label>Tanggal *</label><input type="date" name="tanggal" value="${row.tanggal||todayStr()}" required></div>
+          <div class="field"><label>Shift</label><select name="shift">${DB.shiftMaster.map(s=>`<option value="${escapeHtml(s.nama)}" ${row.shift===s.nama?'selected':''}>${escapeHtml(s.nama)}</option>`).join('')}</select></div>
+          <div class="field"><label>Mesin *</label><select name="mesinId" required>${DB.mesin.map(m=>`<option value="${m.id}" ${row.mesinId===m.id?'selected':''}>${escapeHtml(m.kode)} — ${escapeHtml(m.nama)}</option>`).join('')}</select></div>
+          <div class="field"><label>Produk *</label><select name="produkId" required>${DB.produk.map(p=>`<option value="${p.id}" ${row.produkId===p.id?'selected':''}>${escapeHtml(p.kode)} — ${escapeHtml(p.nama)}</option>`).join('')}</select></div>
+          <div class="field"><label>Jumlah WIP (pcs) *</label><input type="number" name="jumlah" id="wipProdJumlah" value="${row.jumlah??0}" required></div>
+          <div class="field"><label>Waktu Pengerjaan (menit) *</label><input type="number" name="waktuMenit" id="wipProdMenit" value="${row.waktuMenit??0}" required></div>
+          <div class="field full" style="background:var(--ink-850);border-radius:6px;padding:9px 12px;">
+            <span style="font-size:12px;color:var(--ink-200);">🧮 Kecepatan: <b id="wipProdRateDisplay">${(()=>{const r=calcRatePerJam(row.jumlah,row.waktuMenit); return r!==null?fmtNum(r,1)+' pcs/jam':'–';})()}</b></span>
+          </div>
+          <div class="field full"><label>Keterangan</label><input type="text" name="keterangan" value="${escapeHtml(row.keterangan||'')}"></div>
+        </div>
+        <div class="form-actions"><button type="button" class="btn btn-ghost" id="cancelWipProdBtn">Batal</button><button type="submit" class="btn btn-primary">${editing?'Simpan Perubahan':'Tambah Data'}</button></div>
+      </form>`, {wide:true});
+    document.getElementById('cancelWipProdBtn').onclick = closeModal;
+    function updateRate(){
+      const j = parseFloat(document.getElementById('wipProdJumlah').value)||0;
+      const m = parseFloat(document.getElementById('wipProdMenit').value)||0;
+      const r = calcRatePerJam(j,m);
+      document.getElementById('wipProdRateDisplay').textContent = r!==null? fmtNum(r,1)+' pcs/jam' : '–';
+    }
+    document.getElementById('wipProdJumlah').oninput = updateRate;
+    document.getElementById('wipProdMenit').oninput = updateRate;
+    document.getElementById('wipProdForm').onsubmit = (e)=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const obj = editing ? row : {id:uid()};
+      ['tanggal','shift','mesinId','produkId','keterangan'].forEach(f=>obj[f]=fd.get(f));
+      ['jumlah','waktuMenit'].forEach(f=>obj[f]=parseFloat(fd.get(f))||0);
+      if(!editing) DB.wipProduction.push(obj);
+      saveDB(); closeModal(); renderWipProdTable(); toast(editing?'Perubahan disimpan.':'Produksi WIP ditambahkan.');
+    };
+  }
+
+  /* ---------- TAB: Konversi WIP → Barang Jadi ---------- */
+  function drawWipKonversi(mount){
+    mount.innerHTML += stockSummaryCardHtml() + `
+      <div class="toolbar">
+        <div class="toolbar-left"><span class="pill">${(DB.wipConversion||[]).length} data</span></div>
+        ${canEdit?`<button class="btn btn-primary btn-sm" id="addWipConvBtn">+ Tambah Konversi</button>`:''}
+      </div>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Tanggal</th><th>Shift</th><th>Mesin Konversi</th><th>Produk</th><th>Jumlah Dikonversi (pcs)</th><th>Keterangan</th><th>Aksi</th></tr></thead>
+        <tbody id="wipConvTableBody"></tbody>
+      </table></div>
+    `;
+    renderWipConvTable();
+    if(canEdit) document.getElementById('addWipConvBtn').onclick = ()=>openWipConvForm(null);
+  }
+  function renderWipConvTable(){
+    const rows = (DB.wipConversion||[]).slice().sort((a,b)=>b.tanggal.localeCompare(a.tanggal));
+    document.getElementById('wipConvTableBody').innerHTML = rows.length ? rows.map(r=>`
+      <tr>
+        <td>${fmtDate(r.tanggal)}</td>
+        <td>${escapeHtml(r.shift||'–')}</td>
+        <td>${escapeHtml(mesinName(r.mesinId))}</td>
+        <td>${escapeHtml(produkName(r.produkId))}</td>
+        <td class="num">${fmtNum(r.jumlah,0)}</td>
+        <td>${escapeHtml(r.keterangan||'–')}</td>
+        <td><div class="row-actions">${canEdit?`<button class="icon-btn" data-ewc="${r.id}">✎</button><button class="icon-btn del" data-dwc="${r.id}">🗑</button>`:''}</div></td>
+      </tr>`).join('') : `<tr class="empty-row"><td colspan="7">Belum ada data konversi WIP.</td></tr>`;
+    document.querySelectorAll('[data-ewc]').forEach(b=>b.onclick=()=>openWipConvForm(b.dataset.ewc));
+    document.querySelectorAll('[data-dwc]').forEach(b=>b.onclick=()=>{
+      if(!confirm('Hapus data konversi ini? Sisa stok WIP produk terkait akan bertambah kembali.')) return;
+      DB.wipConversion = DB.wipConversion.filter(x=>x.id!==b.dataset.dwc);
+      saveDB(); renderWipConvTable(); toast('Data dihapus.');
+    });
+  }
+  function openWipConvForm(id){
+    const editing = !!id;
+    const row = editing ? DB.wipConversion.find(x=>x.id===id) : {tanggal:todayStr(), shift:DB.shiftMaster[0]?.nama||''};
+    openModal((editing?'Edit ':'Tambah ')+'Konversi WIP ke Barang Jadi', `
+      <form id="wipConvForm">
+        <div class="form-grid">
+          <div class="field"><label>Tanggal *</label><input type="date" name="tanggal" value="${row.tanggal||todayStr()}" required></div>
+          <div class="field"><label>Shift</label><select name="shift">${DB.shiftMaster.map(s=>`<option value="${escapeHtml(s.nama)}" ${row.shift===s.nama?'selected':''}>${escapeHtml(s.nama)}</option>`).join('')}</select></div>
+          <div class="field"><label>Mesin Konversi *</label><select name="mesinId" required>${DB.mesin.map(m=>`<option value="${m.id}" ${row.mesinId===m.id?'selected':''}>${escapeHtml(m.kode)} — ${escapeHtml(m.nama)}</option>`).join('')}</select></div>
+          <div class="field"><label>Produk *</label><select name="produkId" id="wipConvProduk" required>${DB.produk.map(p=>`<option value="${p.id}" ${row.produkId===p.id?'selected':''}>${escapeHtml(p.kode)} — ${escapeHtml(p.nama)}</option>`).join('')}</select></div>
+          <div class="field"><label>Jumlah Dikonversi (pcs) *</label><input type="number" name="jumlah" id="wipConvJumlah" value="${row.jumlah??0}" required></div>
+          <div class="field full" style="background:var(--ink-850);border-radius:6px;padding:9px 12px;">
+            <span style="font-size:12px;color:var(--ink-200);">📦 Sisa stok WIP produk ini saat ini: <b id="wipConvStokDisplay">${fmtNum(wipStock(row.produkId||DB.produk[0]?.id)+(editing?(row.jumlah||0):0),0)}</b> pcs ${editing?'(di luar transaksi yang sedang diedit)':''}</span>
+          </div>
+          <div class="field full"><label>Keterangan</label><input type="text" name="keterangan" value="${escapeHtml(row.keterangan||'')}"></div>
+        </div>
+        <p style="font-size:12px;color:var(--ink-200);margin-top:2px;">Mengonversi WIP menjadi barang jadi tidak mengubah data OEE — gunakan menu "Input Produksi" untuk mencatat hasil barang jadi pada mesin finishing.</p>
+        <div class="form-actions"><button type="button" class="btn btn-ghost" id="cancelWipConvBtn">Batal</button><button type="submit" class="btn btn-primary">${editing?'Simpan Perubahan':'Tambah Data'}</button></div>
+      </form>`, {wide:true});
+    document.getElementById('cancelWipConvBtn').onclick = closeModal;
+    function refreshStokDisplay(){
+      const pid = document.getElementById('wipConvProduk').value;
+      const excl = editing && row.produkId===pid ? (row.jumlah||0) : 0; // jangan hitung ganda transaksi yg sedang diedit
+      document.getElementById('wipConvStokDisplay').textContent = fmtNum(wipStock(pid)+excl,0);
+    }
+    document.getElementById('wipConvProduk').onchange = refreshStokDisplay;
+    document.getElementById('wipConvForm').onsubmit = (e)=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const jumlah = parseFloat(fd.get('jumlah'))||0;
+      const pid = fd.get('produkId');
+      const excl = editing && row.produkId===pid ? (row.jumlah||0) : 0;
+      const tersedia = wipStock(pid)+excl;
+      if(jumlah>tersedia){
+        if(!confirm('Jumlah yang dikonversi ('+fmtNum(jumlah,0)+' pcs) melebihi sisa stok WIP produk ini ('+fmtNum(tersedia,0)+' pcs). Tetap simpan?')) return;
+      }
+      const obj = editing ? row : {id:uid()};
+      ['tanggal','shift','mesinId','produkId','keterangan'].forEach(f=>obj[f]=fd.get(f));
+      obj.jumlah = jumlah;
+      if(!editing) DB.wipConversion.push(obj);
+      saveDB(); closeModal(); renderWipConvTable(); toast(editing?'Perubahan disimpan.':'Konversi WIP dicatat.');
     };
   }
 
@@ -1886,6 +2082,8 @@ PAGE_RENDERERS.oeeInput = function(mount){
     mount.innerHTML = renderTabs();
     wireTabs();
     if(activeTab==='produksi') drawProduksi(mount);
+    else if(activeTab==='wipProduksi') drawWipProduksi(mount);
+    else if(activeTab==='wipKonversi') drawWipKonversi(mount);
     else if(activeTab==='waktuKerja') drawWaktuKerja(mount);
     else if(activeTab==='waktuStop') drawWaktuStop(mount);
   }
