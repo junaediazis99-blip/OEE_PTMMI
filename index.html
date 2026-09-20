@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚙️</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<!-- Chart.js dimuat dinamis (lihat ensureChartJs di skrip utama) agar ada CDN cadangan bila satu CDN diblokir jaringan. -->
 <!-- Firebase SDK (compat build) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -1875,34 +1875,89 @@ PAGE_RENDERERS.dashboard = function(mount){
   draw();
 };
 
+/* =====================================================
+   PEMUATAN CHART.JS DENGAN CDN CADANGAN
+   Beberapa jaringan kantor/operator memblokir cdnjs.cloudflare.com secara
+   spesifik. Coba beberapa CDN populer secara berurutan sebelum menyerah.
+===================================================== */
+const CHART_CDN_URLS = [
+  'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js',
+  'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js',
+  'https://unpkg.com/chart.js@4.4.4/dist/chart.umd.min.js',
+];
+function loadScriptOnce(url, timeoutMs){
+  return new Promise((resolve,reject)=>{
+    const s = document.createElement('script');
+    s.src = url;
+    let done = false;
+    const timer = setTimeout(()=>{ if(!done){ done=true; reject(new Error('timeout memuat '+url)); } }, timeoutMs||8000);
+    s.onload = ()=>{ if(!done){ done=true; clearTimeout(timer); resolve(); } };
+    s.onerror = ()=>{ if(!done){ done=true; clearTimeout(timer); reject(new Error('gagal memuat '+url)); } };
+    document.head.appendChild(s);
+  });
+}
+let _chartLoadPromise = null;
+function ensureChartJs(){
+  if(typeof Chart !== 'undefined') return Promise.resolve(true);
+  if(_chartLoadPromise) return _chartLoadPromise;
+  _chartLoadPromise = (async ()=>{
+    for(const url of CHART_CDN_URLS){
+      try{
+        await loadScriptOnce(url);
+        if(typeof Chart !== 'undefined') return true;
+      }catch(e){ console.warn('CDN Chart.js gagal:', e.message); }
+    }
+    _chartLoadPromise = null; // izinkan dicoba lagi lain kali (mis. tombol Coba Lagi)
+    return false;
+  })();
+  return _chartLoadPromise;
+}
+// Mulai memuat di latar belakang sedini mungkin, tidak menunggu proses lain.
+ensureChartJs();
+
 /* Membuat grafik dengan pengaman: kalau Chart.js belum termuat atau construction
    gagal (mis. masalah jaringan), tampilkan pesan yang jelas alih-alih kotak kosong,
-   dan JANGAN sampai menjatuhkan proses lain (termasuk Insight AI). */
+   dan JANGAN sampai menjatuhkan proses lain (termasuk Insight AI). Bila Chart.js
+   masih dalam proses dimuat lewat CDN cadangan, halaman otomatis dirender ulang
+   begitu berhasil — tanpa perlu tindakan dari pengguna. */
 function renderChartSafe(canvasId, label, config){
   const el = document.getElementById(canvasId);
   if(!el) return null;
   if(typeof Chart === 'undefined'){
-    console.error('Chart.js belum termuat saat membuat grafik "'+label+'".');
-    showChartFallback(el, label, 'Pustaka grafik (Chart.js) belum termuat — biasanya karena koneksi internet lambat/terputus. Coba muat ulang halaman.');
+    console.warn('Chart.js belum termuat saat membuat grafik "'+label+'" — mencoba CDN cadangan…');
+    showChartFallback(el, label, 'Memuat pustaka grafik dari CDN cadangan…', true);
+    ensureChartJs().then(ok=>{
+      if(ok && (CURRENT_PAGE==='dashboard' || CURRENT_PAGE==='laporan')){ navigate(CURRENT_PAGE); }
+      else if(!ok){ showChartFallback(el, label, 'Semua CDN gagal dijangkau — kemungkinan diblokir jaringan/firewall. Coba tombol di bawah atau ganti jaringan.', false); }
+    });
     return null;
   }
   try{
     return new Chart(el, config);
   }catch(err){
     console.error('Gagal membuat grafik "'+label+'":', err);
-    showChartFallback(el, label, err.message||String(err));
+    showChartFallback(el, label, err.message||String(err), false);
     return null;
   }
 }
-function showChartFallback(canvasEl, label, reason){
-  const box = canvasEl.closest('.chart-box') || canvasEl.parentElement;
+function showChartFallback(canvasEl, label, reason, isLoading){
+  const box = canvasEl.closest ? (canvasEl.closest('.chart-box') || canvasEl.parentElement) : canvasEl.parentElement;
   if(!box) return;
-  box.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:6px;color:var(--ink-400);text-align:center;padding:14px;">
-    <span style="font-size:20px;">⚠️</span>
-    <span style="font-size:12px;font-family:var(--font-mono);">Grafik "${escapeHtml(label)}" tidak dapat dimuat</span>
+  box.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;color:var(--ink-400);text-align:center;padding:14px;">
+    <span style="font-size:20px;">${isLoading?'⏳':'⚠️'}</span>
+    <span style="font-size:12px;font-family:var(--font-mono);">Grafik "${escapeHtml(label)}" ${isLoading?'sedang dimuat…':'tidak dapat dimuat'}</span>
     <span style="font-size:11px;">${escapeHtml(reason)}</span>
+    ${isLoading?'':`<button type="button" class="btn btn-ghost btn-sm" onclick="retryCharts()">↺ Coba Lagi</button>`}
   </div>`;
 }
+function retryCharts(){
+  _chartLoadPromise = null;
+  ensureChartJs().then(ok=>{
+    if(ok){ toast('Grafik berhasil dimuat.'); navigate(CURRENT_PAGE); }
+    else{ toast('Masih gagal menjangkau CDN grafik. Periksa koneksi/firewall jaringan.', true); }
+  });
+}
+
 
 function chartOptsLine(){
   return {
