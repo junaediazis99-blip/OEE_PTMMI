@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>OEE PT MMI — Lean Manufacturing Monitor</title>
+<title>OEE MMI — Lean Manufacturing Monitor</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚙️</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -481,10 +481,10 @@ table.data-table tbody tr{animation:fadeIn .3s ease both;}
 <!-- ============ LOGIN SCREEN ============ -->
 <div id="loginScreen">
   <div class="login-visual">
-    <div class="brand-mark"><span class="dot"></span>PT MMI · OEE MONITOR</div>
+    <div class="brand-mark"><span class="dot"></span>MMI · OEE MONITOR</div>
     <svg id="loginSvg" viewBox="0 0 900 700" preserveAspectRatio="xMidYMax slice" xmlns="http://www.w3.org/2000/svg"></svg>
     <div class="visual-caption">
-      <span>PRODUCTION SYSTEM WITH LEAN MANUFACTURING</span>
+      <span>LINE FILLING — PARFUM DIVISION</span>
       <span id="clockCaption">--:--:--</span>
     </div>
   </div>
@@ -1815,9 +1815,19 @@ PAGE_RENDERERS.dashboard = function(mount){
     document.getElementById('dMesin').onchange = e=>{mesinF=e.target.value; draw();};
     document.getElementById('dProduk').onchange = e=>{produkF=e.target.value; draw();};
 
+    // Insight AI dirender LEBIH DULU dan independen dari grafik — supaya tetap
+    // muncul walau pembuatan salah satu chart gagal (mis. Chart.js telat termuat).
+    try{
+      const insights = generateInsights({from,to});
+      document.getElementById('insightList').innerHTML = insights.map(i=>`<div class="insight-item ${i.type}"><span class="ic">${i.ic}</span><div>${i.html}</div></div>`).join('');
+    }catch(err){
+      console.error('Gagal membuat Insight AI:', err);
+      document.getElementById('insightList').innerHTML = `<div class="insight-item warn"><span class="ic">⚠️</span><div>Insight AI gagal dibuat: ${escapeHtml(err.message||String(err))}. Coba muat ulang halaman.</div></div>`;
+    }
+
     destroyDashCharts();
     const trendData = groupByPeriod(rows, (rows.length>45?'week':'day'));
-    dashCharts.trend = new Chart(document.getElementById('chartTrend'), {
+    dashCharts.trend = renderChartSafe('chartTrend', 'Tren OEE', {
       type:'line',
       data:{ labels: trendData.map(t=>t.label),
         datasets:[
@@ -1833,7 +1843,7 @@ PAGE_RENDERERS.dashboard = function(mount){
     rows.forEach(r=>{ (byMesin[r.mesinId]=byMesin[r.mesinId]||[]).push(r); });
     const mesinLabels = Object.keys(byMesin).map(id=>mesinName(id));
     const mesinVals = Object.keys(byMesin).map(id=>+(aggregateOee(byMesin[id]).oee*100).toFixed(1));
-    dashCharts.mesin = new Chart(document.getElementById('chartMesin'), {
+    dashCharts.mesin = renderChartSafe('chartMesin', 'OEE per Mesin', {
       type:'bar',
       data:{labels:mesinLabels, datasets:[{label:'OEE %', data:mesinVals, backgroundColor:mesinVals.map(v=>v>=85?'#3d8f63':(v>=65?'#c08a22':'#c4503f')), borderRadius:4}]},
       options: chartOptsBar()
@@ -1844,7 +1854,7 @@ PAGE_RENDERERS.dashboard = function(mount){
     const catSorted = Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
     let cum=0; const totalDt = catSorted.reduce((s,x)=>s+x[1],0);
     const cumArr = catSorted.map(x=>{ cum+=x[1]; return totalDt? +(cum/totalDt*100).toFixed(1) : 0; });
-    dashCharts.pareto = new Chart(document.getElementById('chartPareto'), {
+    dashCharts.pareto = renderChartSafe('chartPareto', 'Pareto Downtime', {
       data:{ labels: catSorted.map(x=>x[0]),
         datasets:[
           {type:'bar', label:'Menit', data:catSorted.map(x=>x[1]), backgroundColor:'#6a55c4', borderRadius:4, yAxisID:'y'},
@@ -1861,12 +1871,38 @@ PAGE_RENDERERS.dashboard = function(mount){
         }
       }
     });
-
-    const insights = generateInsights({from,to});
-    document.getElementById('insightList').innerHTML = insights.map(i=>`<div class="insight-item ${i.type}"><span class="ic">${i.ic}</span><div>${i.html}</div></div>`).join('');
   }
   draw();
 };
+
+/* Membuat grafik dengan pengaman: kalau Chart.js belum termuat atau construction
+   gagal (mis. masalah jaringan), tampilkan pesan yang jelas alih-alih kotak kosong,
+   dan JANGAN sampai menjatuhkan proses lain (termasuk Insight AI). */
+function renderChartSafe(canvasId, label, config){
+  const el = document.getElementById(canvasId);
+  if(!el) return null;
+  if(typeof Chart === 'undefined'){
+    console.error('Chart.js belum termuat saat membuat grafik "'+label+'".');
+    showChartFallback(el, label, 'Pustaka grafik (Chart.js) belum termuat — biasanya karena koneksi internet lambat/terputus. Coba muat ulang halaman.');
+    return null;
+  }
+  try{
+    return new Chart(el, config);
+  }catch(err){
+    console.error('Gagal membuat grafik "'+label+'":', err);
+    showChartFallback(el, label, err.message||String(err));
+    return null;
+  }
+}
+function showChartFallback(canvasEl, label, reason){
+  const box = canvasEl.closest('.chart-box') || canvasEl.parentElement;
+  if(!box) return;
+  box.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:6px;color:var(--ink-400);text-align:center;padding:14px;">
+    <span style="font-size:20px;">⚠️</span>
+    <span style="font-size:12px;font-family:var(--font-mono);">Grafik "${escapeHtml(label)}" tidak dapat dimuat</span>
+    <span style="font-size:11px;">${escapeHtml(reason)}</span>
+  </div>`;
+}
 
 function chartOptsLine(){
   return {
@@ -1960,8 +1996,8 @@ PAGE_RENDERERS.laporan = function(mount){
     document.querySelectorAll('.tab-btn').forEach(b=>b.onclick=()=>{groupMode=b.dataset.mode; draw();});
     document.getElementById('printBtn').onclick = ()=>printLaporan({from,to,groups,agg,groupMode});
 
-    if(lapCharts.c) lapCharts.c.destroy();
-    lapCharts.c = new Chart(document.getElementById('chartLaporan'), {
+    if(lapCharts.c){ try{ lapCharts.c.destroy(); }catch(e){} lapCharts.c=null; }
+    lapCharts.c = renderChartSafe('chartLaporan', 'Perbandingan OEE', {
       type:'bar',
       data:{labels:groups.map(g=>g.label), datasets:[{label:'OEE %', data:groups.map(g=>+(g.agg.oee*100).toFixed(1)), backgroundColor:groups.map(g=>g.agg.oee>=0.85?'#3d8f63':(g.agg.oee>=0.65?'#c08a22':'#c4503f')), borderRadius:4}]},
       options: chartOptsBar()
