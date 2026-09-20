@@ -6,9 +6,8 @@ Berkas yang Anda terima:
 
 | Berkas | Fungsi |
 |---|---|
-| `index.html` | Seluruh aplikasi (UI, logika OEE, dashboard, laporan) |
-| `firebase-config.js` | Konfigurasi proyek Firebase Anda — **satu-satunya berkas yang wajib diedit** |
-| `database.rules.json` | Aturan keamanan database berbasis role |
+| `index.html` | **Satu-satunya berkas yang perlu diunggah ke situs Anda.** Seluruh aplikasi (UI, logika OEE, dashboard, laporan) DAN konfigurasi Firebase ada di dalam file ini — tidak ada lagi berkas konfigurasi terpisah, supaya tidak ada risiko lupa/salah nama saat unggah. |
+| `database.rules.json` | Aturan keamanan database berbasis role — ditempel di Firebase Console, bukan diunggah ke repo |
 | `PANDUAN-FIREBASE.md` | Dokumen ini |
 
 ---
@@ -34,24 +33,28 @@ Berkas yang Anda terima:
 4. Catat **URL database** yang muncul di atas tabel data, bentuknya seperti:
    `https://oee-mmi-default-rtdb.asia-southeast1.firebasedatabase.app`
 
-## Langkah 4 — Daftarkan Web App & isi `firebase-config.js`
+## Langkah 4 — Daftarkan Web App & isi konfigurasi di `index.html`
 
 1. Klik ikon gerigi ⚙ di kiri atas → **Project settings**.
 2. Gulir ke **Your apps** → klik ikon **</>** (Web).
 3. Beri nama app, misalnya `OEE Web`. **Jangan** centang Firebase Hosting. Klik **Register app**.
-4. Firebase menampilkan objek `firebaseConfig`. Salin nilainya ke berkas **`firebase-config.js`**:
+4. Firebase menampilkan objek `firebaseConfig`. Buka **`index.html`** dengan text editor (Notepad, VS Code, atau langsung "Edit" di GitHub), cari blok berikut di dekat baris ke-16 (tepat sebelum `<style>`), lalu ganti nilai `GANTI_...` dengan nilai dari Firebase Console:
 
-```js
-const FIREBASE_CONFIG = {
-  apiKey: "AIza....",
-  authDomain: "oee-mmi.firebaseapp.com",
-  databaseURL: "https://oee-mmi-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "oee-mmi",
-  storageBucket: "oee-mmi.appspot.com",
-  messagingSenderId: "1234567890",
-  appId: "1:1234567890:web:abcdef"
-};
+```html
+<script>
+  const FIREBASE_CONFIG = {
+    apiKey: "AIza....",
+    authDomain: "oee-mmi.firebaseapp.com",
+    databaseURL: "https://oee-mmi-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "oee-mmi",
+    storageBucket: "oee-mmi.appspot.com",
+    messagingSenderId: "1234567890",
+    appId: "1:1234567890:web:abcdef"
+  };
+</script>
 ```
+
+Simpan berkasnya lalu unggah **`index.html`** yang sudah diedit itu ke repo — tidak ada berkas lain yang perlu diunggah untuk bagian ini.
 
 > **Penting:** pastikan `databaseURL` ikut terisi. Kalau Firebase tidak menampilkannya di cuplikan config, salin manual dari halaman Realtime Database (Langkah 3).
 >
@@ -78,7 +81,7 @@ Ringkasan aturan yang berlaku:
 Sama seperti aplikasi WMS Bahan Kemas Anda:
 
 1. Buat repo baru, misalnya `oee-mmi`.
-2. Unggah `index.html`, `firebase-config.js`, dan `database.rules.json` ke root repo.
+2. Unggah `index.html` (yang sudah Anda isi konfigurasinya di Langkah 4) ke root repo.
 3. Repo → **Settings → Pages** → Source: **Deploy from a branch** → Branch: `main`, folder `/ (root)` → **Save**.
 4. Tunggu 1–2 menit, aplikasi tersedia di `https://<username>.github.io/oee-mmi/`
 
@@ -119,16 +122,16 @@ Untuk **menghapus** pengguna sepenuhnya, hapus profilnya di menu Pengguna, lalu 
 
 Sejak pembaruan ini, konfigurasi **tidak harus** lewat berkas. Di halaman login tersedia dua tautan:
 
-- **⚙ Atur koneksi Firebase** — tempelkan objek `firebaseConfig` langsung dari Firebase Console, lalu klik *Simpan & Hubungkan*. Konfigurasi tersimpan di browser tersebut dan aplikasi memuat ulang sendiri. Berguna untuk mencoba cepat, atau bila `firebase-config.js` belum sempat diunggah.
+- **⚙ Atur koneksi Firebase** — tempelkan objek `firebaseConfig` langsung dari Firebase Console, lalu klik *Simpan & Hubungkan*. Konfigurasi tersimpan di browser tersebut dan aplikasi memuat ulang sendiri. Berguna untuk mencoba cepat sebelum sempat mengedit `index.html`, tapi hanya berlaku di browser itu saja.
 - **Uji koneksi** — memeriksa satu per satu: SDK termuat, konfigurasi ditemukan & terisi, `databaseURL` valid, dijalankan lewat server web, dan apakah database benar-benar terjangkau. Poin bertanda ❌ menunjukkan persis bagian mana yang perlu diperbaiki.
 
-> Untuk pemakaian bersama banyak pengguna, tetap isi `firebase-config.js` dan unggah ke repo — konfigurasi lewat layar hanya berlaku di browser yang mengisinya.
+> Untuk pemakaian bersama banyak pengguna/perangkat, tetap isi blok `FIREBASE_CONFIG` di dalam `index.html` (Langkah 4) dan unggah ke repo — begitu file itu ter-upload, SEMUA browser di perangkat manapun otomatis terhubung tanpa perlu setting apa pun lagi. Konfigurasi lewat layar hanya jalan pintas sementara di satu browser.
 
 ## Bila terjadi masalah
 
 | Gejala | Penyebab & solusi |
 |---|---|
-| Pesan "Firebase belum terkonfigurasi" | `firebase-config.js` belum diisi, atau berkasnya tidak ikut terunggah ke repo |
+| Pesan "Firebase belum terkonfigurasi" | Blok `FIREBASE_CONFIG` di `index.html` masih berisi teks contoh `GANTI_...`, atau `index.html` yang sudah diedit belum ter-upload/ter-commit ke repo |
 | Login gagal: `auth/operation-not-allowed` | Metode Email/Password belum diaktifkan (Langkah 2) |
 | Login gagal: `auth/unauthorized-domain` | Domain GitHub Pages belum didaftarkan di Authorized domains (Langkah 6) |
 | Badge tetap "Offline", data tidak muncul | `databaseURL` salah/kosong, atau Rules belum di-publish |

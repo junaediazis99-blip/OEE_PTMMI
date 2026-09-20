@@ -12,8 +12,27 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-<!-- Konfigurasi Firebase Anda (edit file ini, bukan index.html) -->
-<script src="firebase-config.js"></script>
+<!-- =====================================================
+     KONFIGURASI FIREBASE — diisi LANGSUNG di sini, di dalam index.html.
+     Tidak lagi memakai berkas firebase-config.js terpisah, supaya tidak ada
+     lagi risiko berkas kedua lupa/salah diunggah ke repo.
+
+     Cara mendapatkan nilainya:
+     Firebase Console > ikon gerigi (Project settings) > tab "General" >
+     bagian "Your apps" > pilih Web app > "SDK setup and configuration" >
+     pilih "Config" — lalu salin nilainya ke bawah ini, ganti teks GANTI_....
+===================================================== -->
+<script>
+  const FIREBASE_CONFIG = {
+    apiKey: "GANTI_DENGAN_API_KEY_ANDA",
+    authDomain: "GANTI-PROJECT-ID.firebaseapp.com",
+    databaseURL: "https://GANTI-PROJECT-ID-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "GANTI-PROJECT-ID",
+    storageBucket: "GANTI-PROJECT-ID.appspot.com",
+    messagingSenderId: "GANTI_SENDER_ID",
+    appId: "GANTI_APP_ID"
+  };
+</script>
 <style>
 :root{
   /* Permukaan — dari kanvas paling belakang ke elemen paling menonjol */
@@ -550,7 +569,7 @@ function diagnose(){
   d.config = cfg;
 
   if(!d.sdk) d.problems.push('SDK Firebase tidak termuat. Periksa koneksi internet, atau jaringan/pemblokir yang menutup akses ke <code>gstatic.com</code>.');
-  if(!d.cfgFile && !d.saved) d.problems.push('Berkas <code>firebase-config.js</code> tidak ditemukan di folder yang sama dengan <code>index.html</code> (biasanya lupa diunggah ke repo, atau nama berkasnya berbeda).');
+  if(!d.cfgFile && !d.saved) d.problems.push('Blok konfigurasi Firebase di dalam <code>index.html</code> tidak terbaca (kemungkinan skrip di bagian atas file rusak/terhapus saat diedit).');
   else if(!d.cfgFilled) d.problems.push('Konfigurasi masih berisi teks contoh <code>GANTI_…</code> — belum diisi dengan data proyek Firebase Anda.');
   else if(!d.dbUrl) d.problems.push('Bagian <code>databaseURL</code> kosong atau salah. Salin dari Firebase Console → Realtime Database (bentuknya <code>https://…firebasedatabase.app</code>).');
   if(d.protocol === 'file:') d.problems.push('Halaman dibuka langsung sebagai berkas (<code>file://</code>). Firebase Authentication menolak mode ini — jalankan lewat server, misalnya <code>python -m http.server 8000</code>, lalu buka <code>http://localhost:8000</code>.');
@@ -823,6 +842,22 @@ function getIdealRate(produkId, mesinId){
   if(k) return k.kapasitasPcsPerJam;
   const p = DB.produk.find(x=>x.id===produkId);
   return p ? p.kapasitasPcsPerJam : 0;
+}
+/* Menghitung durasi shift (menit) otomatis dari Jam Mulai & Jam Selesai.
+   Menangani shift yang melewati tengah malam (mis. 23:00 - 07:00). */
+function calcShiftDurationMinutes(jamMulai, jamSelesai){
+  if(!jamMulai || !jamSelesai) return 0;
+  const [h1,m1] = jamMulai.split(':').map(Number);
+  const [h2,m2] = jamSelesai.split(':').map(Number);
+  if([h1,m1,h2,m2].some(isNaN)) return 0;
+  let start = h1*60+m1, end = h2*60+m2;
+  if(end <= start) end += 24*60; // lewat tengah malam
+  return end-start;
+}
+/* Menghitung kecepatan pengerjaan barang WIP (pcs/jam) dari hasil WIP & waktu pengerjaannya. */
+function calcWipRate(row){
+  if(!row || !row.wipMenit || row.wipMenit<=0 || !row.wipCount) return null;
+  return row.wipCount/(row.wipMenit/60);
 }
 /* Total menit "stop yang diizinkan" per shift — berlaku untuk SEMUA mesin & produk
    (mis. istirahat/sholat, briefing awal shift). Ini BUKAN downtime: mengurangi
@@ -1557,16 +1592,53 @@ PAGE_RENDERERS.users = function(mount){
 ===================================================== */
 PAGE_RENDERERS.oeeInput = function(mount){
   const canEdit = can('oeeInput','edit');
+  const canEditSettings = can('settings','edit'); // Waktu Kerja & Waktu Stop tetap khusus Manager
+  let activeTab = 'produksi';
   let filterFrom='', filterTo='', filterMesin='';
+
+  function renderTabs(){
+    return `<div class="tabs">
+      <button class="tab-btn ${activeTab==='produksi'?'active':''}" data-tab="produksi">Input Produksi</button>
+      <button class="tab-btn ${activeTab==='waktuKerja'?'active':''}" data-tab="waktuKerja">Waktu Kerja</button>
+      <button class="tab-btn ${activeTab==='waktuStop'?'active':''}" data-tab="waktuStop">Waktu Stop Diizinkan</button>
+    </div>`;
+  }
+  function wireTabs(){
+    document.querySelectorAll('.tab-btn').forEach(b=>b.onclick=()=>{ activeTab=b.dataset.tab; draw(); });
+  }
+
+  /* ---------- TAB: Input Produksi ---------- */
   function getRows(){
     let rows = filterOee({from:filterFrom||null, to:filterTo||null, mesinId:filterMesin||null});
     return rows.sort((a,b)=> b.tanggal.localeCompare(a.tanggal));
+  }
+  function drawProduksi(mount){
+    mount.innerHTML += `
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <input type="date" class="select-sm" id="fFrom"> <span style="color:var(--ink-400);font-size:12px;">s/d</span>
+          <input type="date" class="select-sm" id="fTo">
+          <select class="select-sm" id="fMesin"><option value="">Semua Mesin</option>${DB.mesin.map(m=>`<option value="${m.id}">${escapeHtml(m.nama)}</option>`).join('')}</select>
+        </div>
+        ${canEdit?`<button class="btn btn-primary btn-sm" id="addOeeBtn">+ Tambah Input</button>`:''}
+      </div>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Tanggal</th><th>Shift</th><th>Mesin</th><th>Produk</th><th>Operator</th><th>Planned (mnt)</th><th>Net Planned</th><th>Downtime (mnt)</th><th>Total (pcs)</th><th>Reject (pcs)</th><th>Hasil WIP (pcs)</th><th>Kecepatan WIP (pcs/jam)</th><th>OEE</th><th>Aksi</th></tr></thead>
+        <tbody id="oeeTableBody"></tbody>
+      </table></div>
+    `;
+    renderTable();
+    document.getElementById('fFrom').oninput = e=>{filterFrom=e.target.value; renderTable();};
+    document.getElementById('fTo').oninput = e=>{filterTo=e.target.value; renderTable();};
+    document.getElementById('fMesin').onchange = e=>{filterMesin=e.target.value; renderTable();};
+    if(canEdit) document.getElementById('addOeeBtn').onclick = ()=>openForm(null);
   }
   function renderTable(){
     const rows = getRows();
     const body = rows.length ? rows.map(r=>{
       const c = calcOeeRow(r);
       const cls = c.oee>=0.85?'good':(c.oee>=0.65?'warn':'bad');
+      const wipRate = calcWipRate(r);
       return `<tr>
         <td>${fmtDate(r.tanggal)}</td>
         <td>${escapeHtml(r.shift)}</td>
@@ -1578,12 +1650,14 @@ PAGE_RENDERERS.oeeInput = function(mount){
         <td class="num">${fmtNum(r.downtimeMenit,0)}</td>
         <td class="num">${fmtNum(r.totalCount,0)}</td>
         <td class="num">${fmtNum(r.rejectCount,0)}</td>
+        <td class="num">${fmtNum(r.wipCount||0,0)}</td>
+        <td class="num">${wipRate!==null? fmtNum(wipRate,1) : '–'}</td>
         <td><span class="pill ${cls}">${pct(c.oee)}</span></td>
         <td><div class="row-actions">
           ${canEdit?`<button class="icon-btn" data-edit="${r.id}" title="Edit">✎</button><button class="icon-btn del" data-del="${r.id}" title="Hapus">🗑</button>`:''}
         </div></td>
       </tr>`;
-    }).join('') : `<tr class="empty-row"><td colspan="12">Tidak ada data pada filter ini.</td></tr>`;
+    }).join('') : `<tr class="empty-row"><td colspan="14">Tidak ada data pada filter ini.</td></tr>`;
     document.getElementById('oeeTableBody').innerHTML = body;
     document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openForm(b.dataset.edit));
     document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
@@ -1594,21 +1668,36 @@ PAGE_RENDERERS.oeeInput = function(mount){
   }
   function openForm(id){
     const editing = !!id;
-    const row = editing ? DB.oeeInput.find(x=>x.id===id) : {tanggal:todayStr(), shift:DB.shiftMaster[0]?.nama||'', plannedTimeMenit:480};
+    const defaultShift = DB.shiftMaster[0];
+    const row = editing ? DB.oeeInput.find(x=>x.id===id) : {
+      tanggal:todayStr(), shift:defaultShift?.nama||'',
+      plannedTimeMenit: defaultShift?.durasiMenit ?? 480,
+    };
     openModal((editing?'Edit ':'Tambah ')+'Input OEE', `
       <form id="oeeForm">
         <div class="form-grid">
           <div class="field"><label>Tanggal *</label><input type="date" name="tanggal" value="${row.tanggal||todayStr()}" required></div>
-          <div class="field"><label>Shift *</label><select name="shift" required>${DB.shiftMaster.map(s=>`<option value="${escapeHtml(s.nama)}" ${row.shift===s.nama?'selected':''}>${escapeHtml(s.nama)} (${s.jamMulai}–${s.jamSelesai})</option>`).join('')}</select></div>
+          <div class="field"><label>Shift *</label><select name="shift" id="oeeShiftSelect" required>${DB.shiftMaster.map(s=>`<option value="${escapeHtml(s.nama)}" data-durasi="${s.durasiMenit||0}" ${row.shift===s.nama?'selected':''}>${escapeHtml(s.nama)} (${s.jamMulai}–${s.jamSelesai})</option>`).join('')}</select></div>
           <div class="field"><label>Mesin *</label><select name="mesinId" required>${DB.mesin.map(m=>`<option value="${m.id}" ${row.mesinId===m.id?'selected':''}>${escapeHtml(m.kode)} — ${escapeHtml(m.nama)}</option>`).join('')}</select></div>
           <div class="field"><label>Produk *</label><select name="produkId" required>${DB.produk.map(p=>`<option value="${p.id}" ${row.produkId===p.id?'selected':''}>${escapeHtml(p.kode)} — ${escapeHtml(p.nama)}</option>`).join('')}</select></div>
           <div class="field"><label>Operator</label><select name="operatorId">${DB.operator.map(o=>`<option value="${o.id}" ${row.operatorId===o.id?'selected':''}>${escapeHtml(o.nama)}</option>`).join('')}</select></div>
-          <div class="field"><label>Planned Time (menit) *</label><input type="number" name="plannedTimeMenit" value="${row.plannedTimeMenit??480}" required></div>
+          <div class="field">
+            <label>Planned Time (menit) *</label>
+            <input type="number" name="plannedTimeMenit" id="oeePlannedInput" value="${row.plannedTimeMenit??480}" required>
+          </div>
+          <div class="field full" style="margin-top:-8px;">
+            <span style="font-size:11px;color:var(--ink-400);">↑ Otomatis terisi dari jam kerja shift yang dipilih (tab "Waktu Kerja") — masih bisa diubah manual bila shift tidak penuh/lembur.</span>
+          </div>
           <div class="field"><label>Total Downtime (menit) *</label><input type="number" name="downtimeMenit" value="${row.downtimeMenit??0}" required></div>
           <div class="field"><label>Total Produksi (pcs) *</label><input type="number" name="totalCount" value="${row.totalCount??0}" required></div>
           <div class="field"><label>Reject (pcs) *</label><input type="number" name="rejectCount" value="${row.rejectCount??0}" required></div>
+          <div class="field"><label>Hasil Produk WIP (pcs)</label><input type="number" name="wipCount" id="oeeWipCount" value="${row.wipCount??0}"></div>
+          <div class="field"><label>Waktu Pengerjaan WIP (menit)</label><input type="number" name="wipMenit" id="oeeWipMenit" value="${row.wipMenit??0}"></div>
+          <div class="field full" style="background:var(--ink-850);border-radius:6px;padding:9px 12px;margin-top:-4px;">
+            <span style="font-size:12px;color:var(--ink-200);">🧮 Kecepatan pengerjaan WIP: <b id="wipRateDisplay">${(()=>{const wr=calcWipRate(row); return wr!==null?fmtNum(wr,1)+' pcs/jam':'–';})()}</b> (dihitung otomatis dari Hasil WIP ÷ Waktu Pengerjaan WIP)</span>
+          </div>
           <div class="field full" style="background:var(--ink-850);border-radius:6px;padding:9px 12px;">
-            <span style="font-size:12px;color:var(--ink-200);">ℹ️ ${fmtNum(totalAllowedStopMinutes(),0)} menit/shift waktu stop yang diizinkan (lihat Pengaturan) otomatis dikurangi dari Planned Time — <b>bukan</b> downtime, tidak perlu dimasukkan ke kolom Total Downtime.</span>
+            <span style="font-size:12px;color:var(--ink-200);">ℹ️ ${fmtNum(totalAllowedStopMinutes(),0)} menit/shift waktu stop yang diizinkan (tab "Waktu Stop Diizinkan") otomatis dikurangi dari Planned Time — <b>bukan</b> downtime, tidak perlu dimasukkan ke kolom Total Downtime.</span>
           </div>
           <div class="field full"><label>Catatan</label><input type="text" name="catatan" value="${escapeHtml(row.catatan||'')}"></div>
         </div>
@@ -1619,35 +1708,188 @@ PAGE_RENDERERS.oeeInput = function(mount){
       </form>
     `, {wide:true});
     document.getElementById('cancelOeeBtn').onclick = closeModal;
+    // Planned Time otomatis mengikuti durasi shift terpilih
+    document.getElementById('oeeShiftSelect').onchange = (e)=>{
+      const opt = e.target.selectedOptions[0];
+      const durasi = opt ? parseFloat(opt.dataset.durasi)||0 : 0;
+      document.getElementById('oeePlannedInput').value = durasi;
+    };
+    // Kecepatan WIP dihitung live saat Hasil WIP / Waktu Pengerjaan WIP diubah
+    function updateWipRate(){
+      const wc = parseFloat(document.getElementById('oeeWipCount').value)||0;
+      const wm = parseFloat(document.getElementById('oeeWipMenit').value)||0;
+      const disp = document.getElementById('wipRateDisplay');
+      disp.textContent = (wm>0 && wc>0) ? fmtNum(wc/(wm/60),1)+' pcs/jam' : '–';
+    }
+    document.getElementById('oeeWipCount').oninput = updateWipRate;
+    document.getElementById('oeeWipMenit').oninput = updateWipRate;
     document.getElementById('oeeForm').onsubmit = (e)=>{
       e.preventDefault();
       const fd = new FormData(e.target);
       const obj = editing ? row : {id:uid()};
       ['tanggal','shift','mesinId','produkId','operatorId','catatan'].forEach(f=> obj[f]=fd.get(f));
-      ['plannedTimeMenit','downtimeMenit','totalCount','rejectCount'].forEach(f=> obj[f]=parseFloat(fd.get(f))||0);
+      ['plannedTimeMenit','downtimeMenit','totalCount','rejectCount','wipCount','wipMenit'].forEach(f=> obj[f]=parseFloat(fd.get(f))||0);
       if(!editing) DB.oeeInput.push(obj);
       saveDB(); closeModal(); renderTable(); toast(editing?'Perubahan disimpan.':'Data OEE ditambahkan.');
     };
   }
-  mount.innerHTML = `
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <input type="date" class="select-sm" id="fFrom"> <span style="color:var(--ink-400);font-size:12px;">s/d</span>
-        <input type="date" class="select-sm" id="fTo">
-        <select class="select-sm" id="fMesin"><option value="">Semua Mesin</option>${DB.mesin.map(m=>`<option value="${m.id}">${escapeHtml(m.nama)}</option>`).join('')}</select>
+
+  /* ---------- TAB: Waktu Kerja (shift master, dipindah dari Pengaturan) ---------- */
+  function drawWaktuKerja(mount){
+    mount.innerHTML += `
+      <div class="card">
+        <div class="card-title">Waktu Kerja / Shift <span class="hint">Durasi (menit) dihitung otomatis dari Jam Mulai &amp; Jam Selesai</span></div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Kode</th><th>Nama Shift</th><th>Jam Mulai</th><th>Jam Selesai</th><th>Durasi (mnt)</th><th>Aksi</th></tr></thead>
+          <tbody id="shiftTableBody"></tbody>
+        </table></div>
+        ${canEditSettings?`<button class="btn btn-ghost btn-sm" id="addShiftBtn" style="margin-top:12px;">+ Tambah Shift</button>`:''}
+        ${!canEditSettings?`<p style="font-size:12px;color:var(--ink-400);margin-top:10px;">Hanya Manager yang dapat mengubah data Waktu Kerja.</p>`:''}
       </div>
-      ${canEdit?`<button class="btn btn-primary btn-sm" id="addOeeBtn">+ Tambah Input</button>`:''}
-    </div>
-    <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Tanggal</th><th>Shift</th><th>Mesin</th><th>Produk</th><th>Operator</th><th>Planned (mnt)</th><th>Net Planned</th><th>Downtime (mnt)</th><th>Total (pcs)</th><th>Reject (pcs)</th><th>OEE</th><th>Aksi</th></tr></thead>
-      <tbody id="oeeTableBody"></tbody>
-    </table></div>
-  `;
-  renderTable();
-  document.getElementById('fFrom').oninput = e=>{filterFrom=e.target.value; renderTable();};
-  document.getElementById('fTo').oninput = e=>{filterTo=e.target.value; renderTable();};
-  document.getElementById('fMesin').onchange = e=>{filterMesin=e.target.value; renderTable();};
-  if(canEdit) document.getElementById('addOeeBtn').onclick = ()=>openForm(null);
+    `;
+    renderShiftTable();
+    if(canEditSettings) document.getElementById('addShiftBtn').onclick = ()=>openShiftForm(null);
+  }
+  function renderShiftTable(){
+    document.getElementById('shiftTableBody').innerHTML = DB.shiftMaster.map(s=>`
+      <tr><td>${escapeHtml(s.kode)}</td><td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.jamMulai)}</td><td>${escapeHtml(s.jamSelesai)}</td><td class="num">${fmtNum(s.durasiMenit,0)}</td>
+      <td><div class="row-actions">${canEditSettings?`<button class="icon-btn" data-es="${s.id}">✎</button><button class="icon-btn del" data-ds="${s.id}">🗑</button>`:''}</div></td></tr>
+    `).join('') || `<tr class="empty-row"><td colspan="6">Belum ada shift.</td></tr>`;
+    document.querySelectorAll('[data-es]').forEach(b=>b.onclick=()=>openShiftForm(b.dataset.es));
+    document.querySelectorAll('[data-ds]').forEach(b=>b.onclick=()=>{
+      if(!confirm('Hapus shift ini?')) return;
+      DB.shiftMaster = DB.shiftMaster.filter(x=>x.id!==b.dataset.ds); saveDB(); renderShiftTable();
+    });
+  }
+  function openShiftForm(id){
+    const editing=!!id; const row = editing? DB.shiftMaster.find(x=>x.id===id) : {};
+    const durasiAwal = calcShiftDurationMinutes(row.jamMulai, row.jamSelesai);
+    openModal((editing?'Edit ':'Tambah ')+'Shift', `
+      <form id="shiftForm">
+        <div class="form-grid">
+          <div class="field"><label>Kode *</label><input name="kode" value="${escapeHtml(row.kode||'')}" required></div>
+          <div class="field"><label>Nama Shift *</label><input name="nama" value="${escapeHtml(row.nama||'')}" required></div>
+          <div class="field"><label>Jam Mulai *</label><input type="time" name="jamMulai" id="shiftJamMulai" value="${row.jamMulai||''}" required></div>
+          <div class="field"><label>Jam Selesai *</label><input type="time" name="jamSelesai" id="shiftJamSelesai" value="${row.jamSelesai||''}" required></div>
+          <div class="field full" style="background:var(--ink-850);border-radius:6px;padding:9px 12px;">
+            <span style="font-size:12.5px;color:var(--ink-200);">🧮 Durasi otomatis: <b id="shiftDurasiDisplay">${fmtNum(durasiAwal,0)}</b> menit</span>
+          </div>
+        </div>
+        <div class="form-actions"><button type="button" class="btn btn-ghost" id="cancelShiftBtn">Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
+      </form>`);
+    document.getElementById('cancelShiftBtn').onclick = closeModal;
+    function updateDurasi(){
+      const jm = document.getElementById('shiftJamMulai').value;
+      const js = document.getElementById('shiftJamSelesai').value;
+      document.getElementById('shiftDurasiDisplay').textContent = fmtNum(calcShiftDurationMinutes(jm,js),0);
+    }
+    document.getElementById('shiftJamMulai').onchange = updateDurasi;
+    document.getElementById('shiftJamSelesai').onchange = updateDurasi;
+    document.getElementById('shiftForm').onsubmit = (e)=>{
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const obj = editing? row : {id:uid()};
+      ['kode','nama','jamMulai','jamSelesai'].forEach(f=>obj[f]=fd.get(f));
+      obj.durasiMenit = calcShiftDurationMinutes(obj.jamMulai, obj.jamSelesai); // selalu dihitung ulang, tidak diinput manual
+      if(!editing) DB.shiftMaster.push(obj);
+      saveDB(); closeModal(); renderShiftTable(); toast('Shift disimpan. Durasi: '+fmtNum(obj.durasiMenit,0)+' menit.');
+    };
+  }
+
+  /* ---------- TAB: Waktu Stop Diizinkan (dipindah dari Pengaturan) ---------- */
+  function drawWaktuStop(mount){
+    mount.innerHTML += `
+      <div class="card">
+        <div class="card-title">Waktu Stop yang Diizinkan (Bukan Downtime) <span class="hint">Berlaku global untuk semua mesin &amp; produk</span></div>
+        <p style="font-size:12.5px;color:var(--ink-200);margin-bottom:12px;line-height:1.55;">
+          Waktu berhenti yang memang direncanakan — misalnya istirahat/sholat atau briefing awal shift —
+          bukan kegagalan mesin. Total menit di bawah ini otomatis <b>dikurangi dari Planned Time</b> setiap
+          input OEE sebelum Availability dihitung, dan <b>tidak</b> tercatat sebagai downtime.
+        </p>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Nama</th><th>Durasi (mnt)</th><th>Status</th><th>Aksi</th></tr></thead>
+          <tbody id="allowedStopBody"></tbody>
+        </table></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:8px;">
+          ${canEditSettings?`<button class="btn btn-ghost btn-sm" id="addAllowedStopBtn">+ Tambah Waktu Stop</button>`:'<span></span>'}
+          <span class="pill good" id="allowedStopTotal"></span>
+        </div>
+        ${!canEditSettings?`<p style="font-size:12px;color:var(--ink-400);margin-top:10px;">Hanya Manager yang dapat mengubah data Waktu Stop Diizinkan.</p>`:''}
+      </div>
+    `;
+    renderAllowedStops();
+    if(canEditSettings) document.getElementById('addAllowedStopBtn').onclick = ()=>openAllowedStopForm(null);
+  }
+  function renderAllowedStops(){
+    const list = DB.settings.allowedStops || [];
+    document.getElementById('allowedStopBody').innerHTML = list.length ? list.map(s=>`
+      <tr>
+        <td>${escapeHtml(s.nama)}</td>
+        <td class="num">${fmtNum(s.durasiMenit,0)}</td>
+        <td><span class="pill ${s.aktif!==false?'good':''}">${s.aktif!==false?'Aktif':'Nonaktif'}</span></td>
+        <td><div class="row-actions">
+          ${canEditSettings?`<button class="icon-btn" data-eas="${s.id}" title="Edit">✎</button><button class="icon-btn del" data-das="${s.id}" title="Hapus">🗑</button>`:''}
+        </div></td>
+      </tr>`).join('') : `<tr class="empty-row"><td colspan="4">Belum ada waktu stop yang diizinkan.</td></tr>`;
+    document.getElementById('allowedStopTotal').textContent = 'Total aktif: '+fmtNum(totalAllowedStopMinutes(),0)+' menit/shift';
+    document.querySelectorAll('[data-eas]').forEach(b=>b.onclick=()=>openAllowedStopForm(b.dataset.eas));
+    document.querySelectorAll('[data-das]').forEach(b=>b.onclick=()=>{
+      if(!confirm('Hapus waktu stop ini?')) return;
+      DB.settings.allowedStops = DB.settings.allowedStops.filter(x=>x.id!==b.dataset.das);
+      saveDB(); renderAllowedStops(); toast('Dihapus.');
+    });
+  }
+  function openAllowedStopForm(id){
+    const editing = !!id;
+    const row = editing ? DB.settings.allowedStops.find(x=>x.id===id) : {aktif:true};
+    const jamAwal = Math.floor((row.durasiMenit||0)/60), menitAwal = (row.durasiMenit||0)%60;
+    openModal((editing?'Edit ':'Tambah ')+'Waktu Stop yang Diizinkan', `
+      <form id="asForm">
+        <div class="form-grid">
+          <div class="field full"><label>Nama *</label><input name="nama" value="${escapeHtml(row.nama||'')}" required placeholder="mis. Istirahat / Sholat"></div>
+          <div class="field"><label>Jam</label><input type="number" min="0" id="asJam" value="${jamAwal}"></div>
+          <div class="field"><label>Menit</label><input type="number" min="0" max="59" id="asMenit" value="${menitAwal}"></div>
+          <div class="field full" style="background:var(--ink-850);border-radius:6px;padding:9px 12px;">
+            <span style="font-size:12.5px;color:var(--ink-200);">🧮 Total: <b id="asTotalDisplay">${fmtNum(row.durasiMenit||0,0)}</b> menit</span>
+          </div>
+          <input type="hidden" name="durasiMenit" id="asDurasiHidden" value="${row.durasiMenit??0}">
+          <div class="field"><label>Status</label><select name="aktif"><option value="true" ${row.aktif!==false?'selected':''}>Aktif</option><option value="false" ${row.aktif===false?'selected':''}>Nonaktif</option></select></div>
+        </div>
+        <p style="font-size:12px;color:var(--ink-200);margin-top:6px;">Berlaku untuk semua mesin dan semua produk — tidak perlu dipilih per item.</p>
+        <div class="form-actions"><button type="button" class="btn btn-ghost" id="cancelAsBtn">Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
+      </form>`);
+    document.getElementById('cancelAsBtn').onclick = closeModal;
+    function updateAsTotal(){
+      const j = parseFloat(document.getElementById('asJam').value)||0;
+      const m = parseFloat(document.getElementById('asMenit').value)||0;
+      const total = j*60+m;
+      document.getElementById('asTotalDisplay').textContent = fmtNum(total,0);
+      document.getElementById('asDurasiHidden').value = total;
+    }
+    document.getElementById('asJam').oninput = updateAsTotal;
+    document.getElementById('asMenit').oninput = updateAsTotal;
+    document.getElementById('asForm').onsubmit = (e)=>{
+      e.preventDefault();
+      updateAsTotal();
+      const fd = new FormData(e.target);
+      const obj = editing ? row : {id:uid()};
+      obj.nama = fd.get('nama');
+      obj.durasiMenit = parseFloat(fd.get('durasiMenit'))||0;
+      obj.aktif = fd.get('aktif')==='true';
+      if(!editing) DB.settings.allowedStops.push(obj);
+      saveDB(); closeModal(); renderAllowedStops(); toast('Waktu stop disimpan. Total: '+fmtNum(obj.durasiMenit,0)+' menit.');
+    };
+  }
+
+  function draw(){
+    mount.innerHTML = '';
+    mount.innerHTML = renderTabs();
+    wireTabs();
+    if(activeTab==='produksi') drawProduksi(mount);
+    else if(activeTab==='waktuKerja') drawWaktuKerja(mount);
+    else if(activeTab==='waktuStop') drawWaktuStop(mount);
+  }
+  draw();
 };
 
 /* =====================================================
@@ -2122,34 +2364,6 @@ PAGE_RENDERERS.settings = function(mount){
       </div>
 
       <div class="card settings-block">
-        <h4>Shift / Waktu Kerja</h4>
-        <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>Kode</th><th>Nama Shift</th><th>Jam Mulai</th><th>Jam Selesai</th><th>Durasi (mnt)</th><th>Aksi</th></tr></thead>
-          <tbody id="shiftTableBody"></tbody>
-        </table></div>
-        <button class="btn btn-ghost btn-sm" id="addShiftBtn" style="margin-top:12px;">+ Tambah Shift</button>
-      </div>
-
-      <div class="card settings-block">
-        <h4>Waktu Stop yang Diizinkan (Bukan Downtime)
-          <span class="hint" style="font-family:var(--font-mono);font-size:11px;color:var(--ink-400);">Berlaku global untuk semua mesin &amp; produk</span>
-        </h4>
-        <p style="font-size:12.5px;color:var(--ink-200);margin-bottom:12px;line-height:1.55;">
-          Waktu berhenti yang memang direncanakan — misalnya istirahat/sholat atau briefing awal shift —
-          bukan kegagalan mesin. Total menit di bawah ini otomatis <b>dikurangi dari Planned Time</b> setiap
-          input OEE sebelum Availability dihitung, dan <b>tidak</b> tercatat sebagai downtime maupun masuk ke Pareto downtime.
-        </p>
-        <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>Nama</th><th>Durasi (mnt)</th><th>Status</th><th>Aksi</th></tr></thead>
-          <tbody id="allowedStopBody"></tbody>
-        </table></div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:8px;">
-          <button class="btn btn-ghost btn-sm" id="addAllowedStopBtn">+ Tambah Waktu Stop</button>
-          <span class="pill good" id="allowedStopTotal"></span>
-        </div>
-      </div>
-
-      <div class="card settings-block">
         <h4>Cadangan Data</h4>
         <p style="font-size:12.5px;color:var(--ink-200);margin-bottom:12px;">Unduh seluruh data sebagai berkas JSON untuk cadangan, atau pulihkan dari berkas cadangan.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
@@ -2158,9 +2372,9 @@ PAGE_RENDERERS.settings = function(mount){
           <button class="btn btn-danger btn-sm" id="resetBtn">↺ Reset ke Data Contoh</button>
         </div>
       </div>
+      <p style="font-size:12px;color:var(--ink-400);">Catatan: pengaturan <b>Waktu Kerja / Shift</b> dan <b>Waktu Stop yang Diizinkan</b> kini ada di menu <b>Input OEE</b> (tab terpisah), bukan di sini lagi.</p>
     `;
-    renderCatChips(); renderShiftTable(); renderAllowedStops();
-    document.getElementById('addAllowedStopBtn').onclick = ()=>openAllowedStopForm(null);
+    renderCatChips();
 
     document.getElementById('saveCompanyBtn').onclick = ()=>{
       DB.settings.companyName = document.getElementById('setCompany').value.trim() || DB.settings.companyName;
@@ -2182,7 +2396,6 @@ PAGE_RENDERERS.settings = function(mount){
       if(!DB.settings.downtimeCategories.includes(v)) DB.settings.downtimeCategories.push(v);
       saveDB(); inp.value=''; renderCatChips(); toast('Kategori ditambahkan.');
     };
-    document.getElementById('addShiftBtn').onclick = ()=>openShiftForm(null);
     document.getElementById('exportBtn').onclick = ()=>{
       const blob = new Blob([JSON.stringify(DB,null,2)], {type:'application/json'});
       const a = document.createElement('a');
@@ -2208,86 +2421,6 @@ PAGE_RENDERERS.settings = function(mount){
     document.querySelectorAll('#catChips button').forEach(b=>b.onclick=()=>{
       DB.settings.downtimeCategories.splice(+b.dataset.idx,1); saveDB(); renderCatChips();
     });
-  }
-  function renderShiftTable(){
-    document.getElementById('shiftTableBody').innerHTML = DB.shiftMaster.map(s=>`
-      <tr><td>${escapeHtml(s.kode)}</td><td>${escapeHtml(s.nama)}</td><td>${escapeHtml(s.jamMulai)}</td><td>${escapeHtml(s.jamSelesai)}</td><td class="num">${fmtNum(s.durasiMenit,0)}</td>
-      <td><div class="row-actions"><button class="icon-btn" data-es="${s.id}">✎</button><button class="icon-btn del" data-ds="${s.id}">🗑</button></div></td></tr>
-    `).join('') || `<tr class="empty-row"><td colspan="6">Belum ada shift.</td></tr>`;
-    document.querySelectorAll('[data-es]').forEach(b=>b.onclick=()=>openShiftForm(b.dataset.es));
-    document.querySelectorAll('[data-ds]').forEach(b=>b.onclick=()=>{
-      if(!confirm('Hapus shift ini?')) return;
-      DB.shiftMaster = DB.shiftMaster.filter(x=>x.id!==b.dataset.ds); saveDB(); renderShiftTable();
-    });
-  }
-  function openShiftForm(id){
-    const editing=!!id; const row = editing? DB.shiftMaster.find(x=>x.id===id) : {};
-    openModal((editing?'Edit ':'Tambah ')+'Shift', `
-      <form id="shiftForm">
-        <div class="form-grid">
-          <div class="field"><label>Kode *</label><input name="kode" value="${escapeHtml(row.kode||'')}" required></div>
-          <div class="field"><label>Nama Shift *</label><input name="nama" value="${escapeHtml(row.nama||'')}" required></div>
-          <div class="field"><label>Jam Mulai *</label><input type="time" name="jamMulai" value="${row.jamMulai||''}" required></div>
-          <div class="field"><label>Jam Selesai *</label><input type="time" name="jamSelesai" value="${row.jamSelesai||''}" required></div>
-          <div class="field full"><label>Durasi (menit) *</label><input type="number" name="durasiMenit" value="${row.durasiMenit??480}" required></div>
-        </div>
-        <div class="form-actions"><button type="button" class="btn btn-ghost" id="cancelShiftBtn">Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
-      </form>`);
-    document.getElementById('cancelShiftBtn').onclick = closeModal;
-    document.getElementById('shiftForm').onsubmit = (e)=>{
-      e.preventDefault();
-      const fd = new FormData(e.target);
-      const obj = editing? row : {id:uid()};
-      ['kode','nama','jamMulai','jamSelesai'].forEach(f=>obj[f]=fd.get(f));
-      obj.durasiMenit = parseFloat(fd.get('durasiMenit'))||0;
-      if(!editing) DB.shiftMaster.push(obj);
-      saveDB(); closeModal(); renderShiftTable(); toast('Shift disimpan.');
-    };
-  }
-  function renderAllowedStops(){
-    const list = DB.settings.allowedStops || [];
-    document.getElementById('allowedStopBody').innerHTML = list.length ? list.map(s=>`
-      <tr>
-        <td>${escapeHtml(s.nama)}</td>
-        <td class="num">${fmtNum(s.durasiMenit,0)}</td>
-        <td><span class="pill ${s.aktif!==false?'good':''}">${s.aktif!==false?'Aktif':'Nonaktif'}</span></td>
-        <td><div class="row-actions">
-          <button class="icon-btn" data-eas="${s.id}" title="Edit">✎</button>
-          <button class="icon-btn del" data-das="${s.id}" title="Hapus">🗑</button>
-        </div></td>
-      </tr>`).join('') : `<tr class="empty-row"><td colspan="4">Belum ada waktu stop yang diizinkan.</td></tr>`;
-    document.getElementById('allowedStopTotal').textContent = 'Total aktif: '+fmtNum(totalAllowedStopMinutes(),0)+' menit/shift';
-    document.querySelectorAll('[data-eas]').forEach(b=>b.onclick=()=>openAllowedStopForm(b.dataset.eas));
-    document.querySelectorAll('[data-das]').forEach(b=>b.onclick=()=>{
-      if(!confirm('Hapus waktu stop ini?')) return;
-      DB.settings.allowedStops = DB.settings.allowedStops.filter(x=>x.id!==b.dataset.das);
-      saveDB(); renderAllowedStops(); toast('Dihapus.');
-    });
-  }
-  function openAllowedStopForm(id){
-    const editing = !!id;
-    const row = editing ? DB.settings.allowedStops.find(x=>x.id===id) : {aktif:true};
-    openModal((editing?'Edit ':'Tambah ')+'Waktu Stop yang Diizinkan', `
-      <form id="asForm">
-        <div class="form-grid">
-          <div class="field full"><label>Nama *</label><input name="nama" value="${escapeHtml(row.nama||'')}" required placeholder="mis. Istirahat / Sholat"></div>
-          <div class="field"><label>Durasi (menit) *</label><input type="number" name="durasiMenit" value="${row.durasiMenit??0}" required></div>
-          <div class="field"><label>Status</label><select name="aktif"><option value="true" ${row.aktif!==false?'selected':''}>Aktif</option><option value="false" ${row.aktif===false?'selected':''}>Nonaktif</option></select></div>
-        </div>
-        <p style="font-size:12px;color:var(--ink-200);margin-top:6px;">Berlaku untuk semua mesin dan semua produk — tidak perlu dipilih per item.</p>
-        <div class="form-actions"><button type="button" class="btn btn-ghost" id="cancelAsBtn">Batal</button><button type="submit" class="btn btn-primary">Simpan</button></div>
-      </form>`);
-    document.getElementById('cancelAsBtn').onclick = closeModal;
-    document.getElementById('asForm').onsubmit = (e)=>{
-      e.preventDefault();
-      const fd = new FormData(e.target);
-      const obj = editing ? row : {id:uid()};
-      obj.nama = fd.get('nama');
-      obj.durasiMenit = parseFloat(fd.get('durasiMenit'))||0;
-      obj.aktif = fd.get('aktif')==='true';
-      if(!editing) DB.settings.allowedStops.push(obj);
-      saveDB(); closeModal(); renderAllowedStops(); toast('Waktu stop disimpan.');
-    };
   }
   draw();
 };
@@ -2403,7 +2536,7 @@ async function attemptLogin(){
   const pass = document.getElementById('loginPass').value;
   loginErr('');
   if(!FB_READY){
-    loginErr('Firebase belum terkonfigurasi. Isi dulu <b>firebase-config.js</b> sesuai panduan.');
+    loginErr('Firebase belum terkonfigurasi. Isi dulu blok <b>FIREBASE_CONFIG</b> di bagian atas <b>index.html</b> sesuai panduan.');
     return;
   }
   setLoginBusy(true);
@@ -2494,7 +2627,7 @@ function openConfigModal(){
     <p style="font-size:13px;color:var(--ink-200);line-height:1.6;margin-bottom:14px;">
       Tempelkan objek <b>firebaseConfig</b> dari Firebase Console
       (Project settings → Your apps → Config). Konfigurasi disimpan di browser ini,
-      sehingga aplikasi tetap terhubung walau berkas <code>firebase-config.js</code> belum diisi.
+      sehingga aplikasi tetap terhubung walau blok <code>FIREBASE_CONFIG</code> di index.html belum diisi.
     </p>
     <div class="field">
       <label>KONFIGURASI FIREBASE</label>
@@ -2534,7 +2667,7 @@ async function openDiagnostics(){
       <span style="flex-shrink:0">${ok?'✅':'❌'}</span><div><b>${label}</b>${detail?`<div style="color:var(--ink-200);font-size:12.3px;margin-top:2px;">${detail}</div>`:''}</div></div>`;
   openModal('Uji Koneksi', `<div id="diagBody">
       ${line(d.sdk,'SDK Firebase termuat', d.sdk?'':'Tidak dapat mengunduh SDK dari gstatic.com.')}
-      ${line(d.cfgFile||d.saved,'Konfigurasi ditemukan', d.saved?'Sumber: disimpan di browser ini.':(d.cfgFile?'Sumber: berkas firebase-config.js':'Berkas firebase-config.js tidak termuat.'))}
+      ${line(d.cfgFile||d.saved,'Konfigurasi ditemukan', d.saved?'Sumber: disimpan di browser ini.':(d.cfgFile?'Sumber: blok FIREBASE_CONFIG di index.html':'Blok FIREBASE_CONFIG di index.html tidak terbaca.'))}
       ${line(d.cfgFilled,'Konfigurasi sudah diisi', d.cfgFilled?('Project ID: <code>'+escapeHtml(d.config.projectId||'–')+'</code>'):'Masih berisi teks contoh GANTI_…')}
       ${line(d.dbUrl,'databaseURL valid', d.config&&d.config.databaseURL?('<code>'+escapeHtml(d.config.databaseURL)+'</code>'):'Belum terisi.')}
       ${line(d.protocol!=='file:','Dijalankan lewat server web', d.protocol==='file:'?'Halaman dibuka sebagai file:// — Firebase Auth akan menolak.':('Protokol: '+d.protocol))}
