@@ -834,6 +834,7 @@ const PERMS = {
   oeeInput:    {view:['staff','supervisor','manager','direksi'], edit:['staff','supervisor','manager']},
   downtime:    {view:['staff','supervisor','manager','direksi'], edit:['staff','supervisor','manager']},
   laporan:     {view:['staff','supervisor','manager','direksi']},
+  oeeGuide:    {view:['staff','supervisor','manager','direksi']},
   settings:    {view:['manager'], edit:['manager']},
   users:       {view:['manager'], edit:['manager']},
 };
@@ -1209,6 +1210,7 @@ const NAV = [
   ]},
   {group:'ANALISIS', items:[
     {key:'laporan', label:'Laporan', ic:'📊'},
+    {key:'oeeGuide', label:'Ilmu OEE', ic:'📘'},
   ]},
   {group:'SISTEM', items:[
     {key:'users', label:'Pengguna', ic:'🔑'},
@@ -1218,7 +1220,8 @@ const NAV = [
 const PAGE_TITLES = {
   dashboard:'Dashboard', oeeInput:'Input OEE Harian', downtime:'Record Downtime',
   produk:'Data Produk Jadi', mesin:'Data Mesin', operator:'Data Operator', kapasitas:'Kapasitas Produksi',
-  laporan:'Laporan OEE', users:'Manajemen Pengguna', settings:'Pengaturan Sistem'
+  laporan:'Laporan OEE', users:'Manajemen Pengguna', settings:'Pengaturan Sistem',
+  oeeGuide:'Ilmu Lean Manufacturing & OEE'
 };
 
 let CURRENT_PAGE = 'dashboard';
@@ -2395,6 +2398,182 @@ function printLaporan({from,to,groups,agg,groupMode}){
 /* =====================================================
    SETTINGS
 ===================================================== */
+/* =====================================================
+   ILMU LEAN MANUFACTURING & OEE (halaman edukasi/referensi)
+===================================================== */
+PAGE_RENDERERS.oeeGuide = function(mount){
+  let activeSection = 'pengertian';
+  const sections = [
+    {key:'pengertian', label:'Pengertian'},
+    {key:'rumus', label:'Rumus & Contoh'},
+    {key:'losses', label:'Six Big Losses'},
+    {key:'manfaat', label:'Manfaat'},
+    {key:'benchmark', label:'Standar & Benchmark'},
+    {key:'istilah', label:'Istilah Terkait'},
+    {key:'penerapan', label:'Penerapan di Aplikasi Ini'},
+  ];
+  const fbox = (label,formula,ket)=>`<div style="background:var(--ink-850);border:1px solid var(--ink-700);border-radius:8px;padding:14px 16px;margin:10px 0;">
+      <div style="font-size:12px;color:var(--ink-400);font-family:var(--font-mono);margin-bottom:4px;">${escapeHtml(label)}</div>
+      <div style="font-family:var(--font-mono);font-size:15px;color:var(--brass);font-weight:600;">${formula}</div>
+      ${ket?`<div style="font-size:12px;color:var(--ink-200);margin-top:6px;line-height:1.5;">${ket}</div>`:''}
+    </div>`;
+
+  function content(){
+    if(activeSection==='pengertian') return `
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-title">Apa itu Lean Manufacturing?</div>
+        <p style="font-size:13.5px;line-height:1.7;color:var(--ink-200);">
+          <b style="color:var(--paper);">Lean Manufacturing</b> adalah filosofi manajemen produksi yang berasal dari Toyota Production System (TPS),
+          bertujuan memaksimalkan nilai bagi pelanggan dengan meminimalkan <b>pemborosan (waste / muda)</b> — menggunakan
+          sumber daya (waktu, tenaga, material, mesin) seefisien mungkin tanpa mengurangi kualitas produk.
+          Tujuan utamanya: menghasilkan produk yang tepat, dalam jumlah tepat, pada waktu tepat, dengan pemborosan seminimal mungkin.
+        </p>
+      </div>
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-title">Apa itu OEE (Overall Equipment Effectiveness)?</div>
+        <p style="font-size:13.5px;line-height:1.7;color:var(--ink-200);">
+          <b style="color:var(--paper);">OEE</b> adalah metrik standar industri untuk mengukur seberapa efektif suatu mesin atau lini produksi
+          dimanfaatkan dibandingkan potensi idealnya (100%). Konsep ini dikembangkan oleh <b>Seiichi Nakajima</b> pada tahun 1960-an
+          sebagai bagian dari <b>Total Productive Maintenance (TPM)</b> di Jepang, dan kini dipakai luas di industri manufaktur
+          (termasuk manufaktur parfum/maklon seperti PT MMI) untuk mengukur produktivitas riil, bukan sekadar target produksi.
+        </p>
+        <p style="font-size:13.5px;line-height:1.7;color:var(--ink-200);margin-top:10px;">
+          OEE menggabungkan tiga faktor kerugian produksi ke dalam satu angka:
+        </p>
+        <div class="grid-3" style="margin-top:10px;">
+          <div class="kpi-card"><div class="kl" style="margin-top:0;font-size:13px;color:var(--paper);font-weight:600;">Availability</div><div class="kd" style="margin-top:6px;">Seberapa lama mesin benar-benar beroperasi dibanding waktu yang direncanakan.</div></div>
+          <div class="kpi-card"><div class="kl" style="margin-top:0;font-size:13px;color:var(--paper);font-weight:600;">Performance</div><div class="kd" style="margin-top:6px;">Seberapa cepat mesin berproduksi dibanding kecepatan standar/idealnya.</div></div>
+          <div class="kpi-card"><div class="kl" style="margin-top:0;font-size:13px;color:var(--paper);font-weight:600;">Quality</div><div class="kd" style="margin-top:6px;">Seberapa besar porsi hasil produksi yang memenuhi standar (tidak reject).</div></div>
+        </div>
+      </div>`;
+
+    if(activeSection==='rumus') return `
+      <div class="card" style="margin-bottom:16px;">
+        <div class="card-title">Rumus Tiga Komponen OEE</div>
+        ${fbox('AVAILABILITY', 'Operating Time ÷ Planned Production Time',
+          'Planned Production Time = Total waktu shift − Waktu Stop yang Diizinkan (istirahat, briefing, dll — direncanakan, bukan kegagalan).<br>Operating Time = Planned Production Time − Downtime (breakdown, menunggu material, dll — tidak direncanakan).')}
+        ${fbox('PERFORMANCE', '(Ideal Cycle Time × Total Unit) ÷ Operating Time',
+          'Ideal Cycle Time = 60 ÷ Kapasitas Standar (pcs/jam) dari data master Kapasitas Produksi.<br>Total Unit = Jumlah OK + Reject (semua yang diproses mesin, baik maupun cacat).')}
+        ${fbox('QUALITY', 'Jumlah OK ÷ Total Unit',
+          'Total Unit = Jumlah OK + Reject.')}
+        ${fbox('OEE', 'Availability × Performance × Quality', 'Hasil akhir selalu antara 0% – 100%.')}
+      </div>
+      <div class="card">
+        <div class="card-title">Contoh Perhitungan</div>
+        <p style="font-size:13px;color:var(--ink-200);margin-bottom:10px;">Misalkan satu entri Input OEE punya data berikut:</p>
+        <div class="table-wrap"><table class="data-table">
+          <tbody>
+            <tr><td>Jam Mulai – Selesai Produksi</td><td class="num">07:00 – 15:00 (480 menit)</td></tr>
+            <tr><td>Waktu Diizinkan Stop</td><td class="num">75 menit</td></tr>
+            <tr><td style="color:var(--brass);">→ Planned Production Time</td><td class="num" style="color:var(--brass);">480 − 75 = 405 menit</td></tr>
+            <tr><td>Downtime</td><td class="num">40 menit</td></tr>
+            <tr><td style="color:var(--brass);">→ Operating Time</td><td class="num" style="color:var(--brass);">405 − 40 = 365 menit</td></tr>
+            <tr><td>Kapasitas Standar</td><td class="num">336 pcs/jam</td></tr>
+            <tr><td>Jumlah OK</td><td class="num">1.850 pcs</td></tr>
+            <tr><td>Reject</td><td class="num">50 pcs</td></tr>
+            <tr><td style="color:var(--brass);">→ Total Unit</td><td class="num" style="color:var(--brass);">1.900 pcs</td></tr>
+          </tbody>
+        </table></div>
+        <div class="grid-3" style="margin-top:14px;">
+          <div class="kpi-card kpi-good"><div class="kv">90,1%</div><div class="kl">Availability = 365÷405</div></div>
+          <div class="kpi-card kpi-warn"><div class="kv">86,6%</div><div class="kl">Performance = (1900÷336×60)÷365</div></div>
+          <div class="kpi-card kpi-good"><div class="kv">97,4%</div><div class="kl">Quality = 1850÷1900</div></div>
+        </div>
+        <div class="kpi-card kpi-brass" style="margin-top:12px;"><div class="kv">76,0%</div><div class="kl">OEE = 90,1% × 86,6% × 97,4%</div></div>
+      </div>`;
+
+    if(activeSection==='losses') return `
+      <div class="card">
+        <div class="card-title">Six Big Losses (Enam Kerugian Besar)</div>
+        <p style="font-size:13px;color:var(--ink-200);margin-bottom:14px;line-height:1.6;">
+          Nakajima mengelompokkan seluruh kerugian produksi ke dalam enam kategori, masing-masing menekan salah satu dari tiga komponen OEE.
+          Menu <b>Insight AI</b> di Dashboard aplikasi ini menghitung kerugian-kerugian ini secara otomatis dan menyetarakannya ke satuan menit.
+        </p>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Komponen OEE</th><th>Kerugian</th><th>Contoh</th></tr></thead>
+          <tbody>
+            <tr><td rowspan="2"><span class="pill">Availability Loss</span></td><td>1. Breakdown / Kerusakan Mesin</td><td>Mesin mati mendadak, menunggu spare part</td></tr>
+            <tr><td>2. Setup &amp; Adjustment</td><td>Changeover produk, penyetelan mesin</td></tr>
+            <tr><td rowspan="2"><span class="pill warn">Performance Loss</span></td><td>3. Idling &amp; Minor Stops</td><td>Macet sesaat, penyumbatan kecil, sensor error</td></tr>
+            <tr><td>4. Reduced Speed</td><td>Mesin berjalan di bawah kecepatan standar</td></tr>
+            <tr><td rowspan="2"><span class="pill bad">Quality Loss</span></td><td>5. Process Defect</td><td>Reject saat produksi normal</td></tr>
+            <tr><td>6. Reduced Yield</td><td>Reject saat start-up/warm-up mesin</td></tr>
+          </tbody>
+        </table></div>
+      </div>`;
+
+    if(activeSection==='manfaat') return `
+      <div class="card">
+        <div class="card-title">Kegunaan OEE bagi Perusahaan</div>
+        <div class="insight-list">
+          <div class="insight-item good"><span class="ic">🎯</span><div><b>Mengidentifikasi bottleneck</b> — menunjukkan mesin/lini mana yang paling menghambat produktivitas, dan komponen (A/P/Q) mana penyebabnya.</div></div>
+          <div class="insight-item good"><span class="ic">📈</span><div><b>Dasar continuous improvement (Kaizen)</b> — tim produksi bisa fokus memperbaiki penyebab kerugian terbesar lebih dulu, bukan menebak-nebak.</div></div>
+          <div class="insight-item good"><span class="ic">⚖️</span><div><b>Benchmark antar mesin, lini, dan shift</b> — membandingkan performa secara objektif dengan angka yang sama.</div></div>
+          <div class="insight-item good"><span class="ic">📐</span><div><b>Mengukur kapasitas riil vs teoritis</b> — membantu perencanaan produksi dan janji pengiriman ke klien maklon lebih akurat.</div></div>
+          <div class="insight-item good"><span class="ic">🔧</span><div><b>Mendukung budaya TPM</b> — mendorong keterlibatan operator dalam perawatan mesin harian (autonomous maintenance).</div></div>
+          <div class="insight-item good"><span class="ic">💰</span><div><b>Dasar keputusan investasi</b> — menunjukkan apakah kerugian sebaiknya diatasi lewat perbaikan proses atau penambahan mesin baru.</div></div>
+        </div>
+      </div>`;
+
+    if(activeSection==='benchmark') return `
+      <div class="card">
+        <div class="card-title">Standar &amp; Benchmark Skor OEE</div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Kategori</th><th>Skor OEE</th><th>Keterangan</th></tr></thead>
+          <tbody>
+            <tr><td><span class="pill good">World Class</span></td><td class="num">≥ 85%</td><td>Availability ≥90%, Performance ≥95%, Quality ≥99% — standar acuan global (dipakai sebagai Target OEE bawaan aplikasi ini).</td></tr>
+            <tr><td><span class="pill warn">Cukup Baik</span></td><td class="num">65% – 84%</td><td>Masih ada ruang perbaikan cukup besar, biasanya di komponen Performance.</td></tr>
+            <tr><td><span class="pill bad">Perlu Perhatian</span></td><td class="num">40% – 64%</td><td>Rata-rata umum industri manufaktur yang belum menerapkan lean secara konsisten.</td></tr>
+            <tr><td><span class="pill bad">Kritis</span></td><td class="num">&lt; 40%</td><td>Kerugian produksi sangat signifikan, perlu investigasi akar masalah segera.</td></tr>
+          </tbody>
+        </table></div>
+        <p style="font-size:12px;color:var(--ink-400);margin-top:10px;">Target ini dapat disesuaikan di menu Pengaturan → Target OEE, mengikuti standar internal perusahaan.</p>
+      </div>`;
+
+    if(activeSection==='istilah') return `
+      <div class="card">
+        <div class="card-title">Istilah Terkait Lean Manufacturing</div>
+        <div class="table-wrap"><table class="data-table">
+          <tbody>
+            <tr><td style="width:160px;"><b>TPM</b></td><td>Total Productive Maintenance — sistem perawatan mesin yang melibatkan seluruh karyawan, bukan hanya tim maintenance.</td></tr>
+            <tr><td><b>Kaizen</b></td><td>Perbaikan berkelanjutan (continuous improvement) melalui perubahan-perubahan kecil dan konsisten.</td></tr>
+            <tr><td><b>5S</b></td><td>Seiri-Seiton-Seiso-Seiketsu-Shitsuke (Ringkas-Rapi-Resik-Rawat-Rajin) — metode menjaga area kerja tertata dan efisien.</td></tr>
+            <tr><td><b>Muda</b></td><td>Pemborosan — segala aktivitas yang tidak memberi nilai tambah bagi pelanggan.</td></tr>
+            <tr><td><b>WIP</b></td><td>Work In Progress — barang setengah jadi yang masih dalam proses, belum menjadi produk jadi.</td></tr>
+            <tr><td><b>Takt Time</b></td><td>Kecepatan produksi yang dibutuhkan untuk memenuhi permintaan pelanggan dalam waktu tertentu.</td></tr>
+            <tr><td><b>JIT</b></td><td>Just In Time — memproduksi sesuai kebutuhan, mengurangi penumpukan stok/WIP berlebih.</td></tr>
+            <tr><td><b>Poka-Yoke</b></td><td>Mekanisme anti-kesalahan yang mencegah cacat terjadi sejak awal proses.</td></tr>
+          </tbody>
+        </table></div>
+      </div>`;
+
+    if(activeSection==='penerapan') return `
+      <div class="card">
+        <div class="card-title">Bagaimana Teori Ini Diterapkan di Aplikasi OEE MMI</div>
+        <div class="insight-list">
+          <div class="insight-item"><span class="ic">⏱️</span><div><b>Waktu Diizinkan Stop</b> (menu Input OEE) = <i>planned downtime</i> dalam teori — dikurangkan dari total jam kerja sebelum Availability dihitung, karena memang direncanakan (istirahat, briefing), bukan kegagalan.</div></div>
+          <div class="insight-item"><span class="ic">⛔</span><div><b>Downtime</b> = Availability Loss — kerugian tak terencana (breakdown, menunggu material, dst) yang tercatat di menu Downtime dan field Downtime pada Input OEE.</div></div>
+          <div class="insight-item"><span class="ic">📐</span><div><b>Kapasitas Produksi</b> (Master Data) = dasar <i>Ideal Cycle Time</i> untuk menghitung Performance setiap entri.</div></div>
+          <div class="insight-item"><span class="ic">✅</span><div><b>Jumlah OK &amp; Reject</b> = dasar perhitungan Quality, sekaligus basis Quality Loss pada Six Big Losses.</div></div>
+          <div class="insight-item"><span class="ic">💡</span><div><b>Insight AI</b> (Dashboard) = otomatisasi analisis Six Big Losses dari seluruh data yang sudah diinput, menunjukkan kerugian terbesar dalam satuan menit yang sepadan.</div></div>
+          <div class="insight-item"><span class="ic">🧪</span><div><b>Hasil WIP, WIP Reject &amp; Konversi WIP</b> = pelacakan aliran <i>Work In Progress</i> antar tahap produksi, membantu mengurangi Muda akibat penumpukan barang setengah jadi — sejalan dengan prinsip Just In Time.</div></div>
+          <div class="insight-item"><span class="ic">📊</span><div><b>Laporan &amp; Target OEE</b> = alat <i>benchmark</i> antar mesin/produk/periode terhadap standar World Class OEE (85%) yang bisa disesuaikan di Pengaturan.</div></div>
+        </div>
+      </div>`;
+
+    return '';
+  }
+
+  function draw(){
+    mount.innerHTML = `
+      <div class="tabs">${sections.map(s=>`<button class="tab-btn ${activeSection===s.key?'active':''}" data-sec="${s.key}">${escapeHtml(s.label)}</button>`).join('')}</div>
+      ${content()}
+    `;
+    document.querySelectorAll('.tab-btn').forEach(b=>b.onclick=()=>{ activeSection=b.dataset.sec; draw(); });
+  }
+  draw();
+};
+
 PAGE_RENDERERS.settings = function(mount){
   function draw(){
     mount.innerHTML = `
