@@ -268,6 +268,7 @@ input,select,textarea{font-family:inherit;}
 }
 .role-badge.role-direksi{border-color:var(--brass); color:var(--brass-bright);}
 .role-badge.role-manager{border-color:var(--teal); color:var(--teal-bright);}
+.role-badge.role-superadmin{border-color:var(--bad); color:var(--bad); font-weight:600;}
 
 .main-content{flex:1; padding:22px; max-width:1400px; width:100%; margin:0 auto;}
 @media (max-width:980px){
@@ -701,6 +702,7 @@ function seedData(){
   return {
     users: [],
     produk, mesin, operator, kapasitas, shiftMaster, oeeInput, downtime,
+    activityLog: [],
     settings:{
       companyName:'PT MMI — Maklon & Manufaktur Parfum',
       downtimeCategories,
@@ -712,7 +714,7 @@ function seedData(){
 
 let DB = null;
 let SESSION = null;
-const DATA_COLLS = ['produk','mesin','operator','kapasitas','shiftMaster','oeeInput','downtime','settings'];
+const DATA_COLLS = ['produk','mesin','operator','kapasitas','shiftMaster','oeeInput','downtime','settings','activityLog'];
 let _shadow = {};          // snapshot terakhir tiap koleksi -> dipakai menulis per-bagian saja
 let _suppressSync = false; // cegah re-render saat perubahan berasal dari tulisan kita sendiri
 
@@ -724,6 +726,22 @@ function ensureShape(){
   if(!DB.settings.downtimeCategories) DB.settings.downtimeCategories = seed.settings.downtimeCategories;
   if(!DB.settings.oeeTargets) DB.settings.oeeTargets = seed.settings.oeeTargets;
   if(!DB.settings.allowedStops) DB.settings.allowedStops = seed.settings.allowedStops;
+}
+/* Mencatat aktivitas pengguna ke Log. Dipanggil tepat sebelum saveDB() di setiap
+   aksi tambah/ubah/hapus supaya tersimpan dalam transaksi tulis yang sama. */
+function logActivity(action, module, description){
+  if(!DB) return;
+  if(!DB.activityLog) DB.activityLog = [];
+  DB.activityLog.push({
+    id: uid(),
+    ts: new Date().toISOString(),
+    userId: SESSION ? SESSION.uid : null,
+    userName: SESSION ? SESSION.nama : 'Sistem',
+    role: SESSION ? SESSION.role : '',
+    action, module, description,
+  });
+  // Batasi ukuran log supaya tidak membengkak tanpa batas (Realtime Database punya batas ukuran per node).
+  if(DB.activityLog.length > 1000) DB.activityLog = DB.activityLog.slice(-1000);
 }
 function snapshotShadow(){
   _shadow = {};
@@ -820,8 +838,8 @@ async function deleteUserProfile(uid2){
   await fbDb.ref(USERS_PATH+'/'+uid2).remove();
 }
 
-const ROLE_LABEL = {staff:'Staff', supervisor:'Supervisor', manager:'Manager', direksi:'Direksi'};
-const ROLE_COLOR = {staff:'', supervisor:'', manager:'role-manager', direksi:'role-direksi'};
+const ROLE_LABEL = {staff:'Staff', supervisor:'Supervisor', manager:'Manager', direksi:'Direksi', superadmin:'Super Admin'};
+const ROLE_COLOR = {staff:'', supervisor:'', manager:'role-manager', direksi:'role-direksi', superadmin:'role-superadmin'};
 
 // permission matrix per module: which roles can view / edit(crud) / manage(settings-level)
 const PERMS = {
@@ -836,9 +854,11 @@ const PERMS = {
   oeeGuide:    {view:['staff','supervisor','manager','direksi']},
   settings:    {view:['manager'], edit:['manager']},
   users:       {view:['manager'], edit:['manager']},
+  activityLog: {view:['manager']},
 };
 function can(mod, level='view'){
   if(!SESSION) return false;
+  if(SESSION.role === 'superadmin') return true; // Super Admin: akses penuh ke seluruh modul, termasuk yang khusus Manager
   const p = PERMS[mod];
   if(!p || !p[level]) return false;
   return p[level].includes(SESSION.role);
@@ -1213,6 +1233,7 @@ const NAV = [
   ]},
   {group:'SISTEM', items:[
     {key:'users', label:'Pengguna', ic:'🔑'},
+    {key:'activityLog', label:'Log Aktivitas', ic:'📜'},
     {key:'settings', label:'Pengaturan', ic:'☰'},
   ]},
 ];
@@ -1220,7 +1241,7 @@ const PAGE_TITLES = {
   dashboard:'Dashboard', oeeInput:'Input OEE Harian', downtime:'Record Downtime',
   produk:'Data Produk Jadi', mesin:'Data Mesin', operator:'Data Operator', kapasitas:'Kapasitas Produksi',
   laporan:'Laporan OEE', users:'Manajemen Pengguna', settings:'Pengaturan Sistem',
-  oeeGuide:'Ilmu Lean Manufacturing & OEE'
+  oeeGuide:'Ilmu Lean Manufacturing & OEE', activityLog:'Log Aktivitas'
 };
 
 let CURRENT_PAGE = 'dashboard';
@@ -1373,9 +1394,14 @@ function makeCrudPage(config){
         </div></td>` : '<td></td>';
       return `<tr>${cells}${actions}</tr>`;
     }
+    function rowLabel(r){
+      return r.kode || r.nik || r.nama || r.id;
+    }
     function deleteRow(id){
       if(!confirm('Hapus data ini? Tindakan tidak dapat dibatalkan.')) return;
+      const row = DB[config.key].find(x=>x.id===id);
       DB[config.key] = DB[config.key].filter(x=>x.id!==id);
+      logActivity('delete', config.key, config.title+' dihapus: '+escapeHtml(row?rowLabel(row):id));
       saveDB(); renderTable(); toast('Data dihapus.');
     }
     function openForm(id){
@@ -1410,6 +1436,7 @@ function makeCrudPage(config){
         });
         if(config.beforeSave) config.beforeSave(obj);
         if(!editing) DB[config.key].push(obj);
+        logActivity(editing?'update':'create', config.key, config.title+' '+(editing?'diperbarui':'ditambahkan')+': '+escapeHtml(rowLabel(obj)));
         saveDB(); closeModal(); renderTable(); toast(editing?'Perubahan disimpan.':'Data ditambahkan.');
       };
     }
@@ -1549,7 +1576,9 @@ PAGE_RENDERERS.users = function(mount){
     document.querySelectorAll('[data-du]').forEach(b=>b.onclick=()=>removeUser(b.dataset.du));
   }
   function roleOptions(sel){
-    return ['staff','supervisor','manager','direksi'].map(r=>`<option value="${r}" ${sel===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join('');
+    const roles = ['staff','supervisor','manager','direksi'];
+    if(SESSION.role==='superadmin') roles.push('superadmin'); // hanya Super Admin yang boleh menetapkan role Super Admin
+    return roles.map(r=>`<option value="${r}" ${sel===r?'selected':''}>${ROLE_LABEL[r]}</option>`).join('');
   }
   function openEdit(uid2){
     const u = DB.users.find(x=>x.uid===uid2); if(!u) return;
@@ -1569,13 +1598,21 @@ PAGE_RENDERERS.users = function(mount){
       const fd = new FormData(e.target);
       try{
         await saveUserProfile(uid2, {email:u.email, nama:fd.get('nama'), role:fd.get('role'), area:fd.get('area')||''});
+        logActivity('update','users','Profil pengguna diperbarui: '+escapeHtml(u.email)+' → role '+ROLE_LABEL[fd.get('role')]);
+        saveDB();
         closeModal(); await refresh(); toast('Profil pengguna disimpan.');
       }catch(err){ toast('Gagal menyimpan: '+err.message, true); }
     };
   }
   async function removeUser(uid2){
     if(!confirm('Hapus profil pengguna ini? Akun login di Firebase Authentication harus dihapus terpisah lewat Firebase Console.')) return;
-    try{ await deleteUserProfile(uid2); await refresh(); toast('Profil pengguna dihapus.'); }
+    const target = DB.users.find(x=>x.uid===uid2);
+    try{
+      await deleteUserProfile(uid2);
+      logActivity('delete','users','Profil pengguna dihapus: '+escapeHtml(target?target.email:uid2));
+      saveDB();
+      await refresh(); toast('Profil pengguna dihapus.');
+    }
     catch(err){ toast('Gagal menghapus: '+err.message, true); }
   }
   function openCreate(){
@@ -1603,6 +1640,8 @@ PAGE_RENDERERS.users = function(mount){
         const cred = await secondary.auth().createUserWithEmailAndPassword(fd.get('email'), fd.get('password'));
         await saveUserProfile(cred.user.uid, {email:fd.get('email'), nama:fd.get('nama'), role:fd.get('role'), area:fd.get('area')||''});
         await secondary.auth().signOut();
+        logActivity('create','users','Akun pengguna dibuat: '+escapeHtml(fd.get('email'))+' — role '+ROLE_LABEL[fd.get('role')]);
+        saveDB();
         closeModal(); await refresh(); toast('Akun pengguna dibuat.');
       }catch(err){
         btn.disabled=false; btn.textContent='Buat Akun';
@@ -1683,7 +1722,9 @@ PAGE_RENDERERS.oeeInput = function(mount){
     document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openForm(b.dataset.edit));
     document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
       if(!confirm('Hapus data input OEE ini?')) return;
+      const row = DB.oeeInput.find(x=>x.id===b.dataset.del);
       DB.oeeInput = DB.oeeInput.filter(x=>x.id!==b.dataset.del);
+      if(row) logActivity('delete','oeeInput','Input OEE dihapus: '+fmtDate(row.tanggal)+' — '+escapeHtml(mesinName(row.mesinId))+' / '+escapeHtml(produkName(row.produkId)));
       saveDB(); renderTable(); renderStockCard();
       toast('Data dihapus.');
     });
@@ -1782,6 +1823,7 @@ PAGE_RENDERERS.oeeInput = function(mount){
       ['tanggal','shift','jamMulaiProduksi','jamSelesaiProduksi','mesinId','produkId','operatorId','catatan'].forEach(f=> obj[f]=fd.get(f));
       ['allowedStopMenit','downtimeMenit','jumlahOK','rejectCount','wipCount','wipRejectCount','wipConvertedCount'].forEach(f=> obj[f]=parseFloat(fd.get(f))||0);
       if(!editing) DB.oeeInput.push(obj);
+      logActivity(editing?'update':'create','oeeInput','Input OEE '+(editing?'diperbarui':'ditambahkan')+': '+fmtDate(obj.tanggal)+' — '+escapeHtml(mesinName(obj.mesinId))+' / '+escapeHtml(produkName(obj.produkId)));
       saveDB(); closeModal(); renderTable(); renderStockCard();
       toast(editing?'Perubahan disimpan.':'Data OEE ditambahkan.');
     };
@@ -1813,7 +1855,10 @@ PAGE_RENDERERS.oeeInput = function(mount){
       document.querySelectorAll('[data-es]').forEach(b=>b.onclick=()=>openShiftForm(b.dataset.es));
       document.querySelectorAll('[data-ds]').forEach(b=>b.onclick=()=>{
         if(!confirm('Hapus shift ini?')) return;
-        DB.shiftMaster = DB.shiftMaster.filter(x=>x.id!==b.dataset.ds); saveDB();
+        const row = DB.shiftMaster.find(x=>x.id===b.dataset.ds);
+        DB.shiftMaster = DB.shiftMaster.filter(x=>x.id!==b.dataset.ds);
+        if(row) logActivity('delete','shiftMaster','Shift dihapus: '+escapeHtml(row.nama));
+        saveDB();
         document.getElementById('modalBody').innerHTML = body(); wire();
       });
     }
@@ -1846,6 +1891,7 @@ PAGE_RENDERERS.oeeInput = function(mount){
         ['kode','nama','jamMulai','jamSelesai'].forEach(f=>obj[f]=fd.get(f));
         obj.durasiMenit = calcShiftDurationMinutes(obj.jamMulai, obj.jamSelesai);
         if(!editing) DB.shiftMaster.push(obj);
+        logActivity(editing?'update':'create','shiftMaster','Shift '+(editing?'diperbarui':'ditambahkan')+': '+escapeHtml(obj.nama));
         saveDB(); toast('Shift disimpan.');
         openModal('Kelola Shift', body(), {wide:true}); wire();
       };
@@ -1883,7 +1929,10 @@ PAGE_RENDERERS.oeeInput = function(mount){
       document.querySelectorAll('[data-eas]').forEach(b=>b.onclick=()=>openAsForm(b.dataset.eas));
       document.querySelectorAll('[data-das]').forEach(b=>b.onclick=()=>{
         if(!confirm('Hapus item ini?')) return;
-        DB.settings.allowedStops = DB.settings.allowedStops.filter(x=>x.id!==b.dataset.das); saveDB();
+        const row = DB.settings.allowedStops.find(x=>x.id===b.dataset.das);
+        DB.settings.allowedStops = DB.settings.allowedStops.filter(x=>x.id!==b.dataset.das);
+        if(row) logActivity('delete','settings','Waktu Diizinkan Stop dihapus: '+escapeHtml(row.nama));
+        saveDB();
         document.getElementById('modalBody').innerHTML = body(); wire();
       });
     }
@@ -1924,6 +1973,7 @@ PAGE_RENDERERS.oeeInput = function(mount){
         obj.durasiMenit = parseFloat(fd.get('durasiMenit'))||0;
         obj.aktif = fd.get('aktif')==='true';
         if(!editing) DB.settings.allowedStops.push(obj);
+        logActivity(editing?'update':'create','settings','Waktu Diizinkan Stop '+(editing?'diperbarui':'ditambahkan')+': '+escapeHtml(obj.nama));
         saveDB(); toast('Disimpan.');
         openModal('Kelola Waktu Diizinkan Stop', body(), {wide:true}); wire();
       };
@@ -1981,7 +2031,9 @@ PAGE_RENDERERS.downtime = function(mount){
     document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openForm(b.dataset.edit));
     document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{
       if(!confirm('Hapus record downtime ini?')) return;
+      const row = DB.downtime.find(x=>x.id===b.dataset.del);
       DB.downtime = DB.downtime.filter(x=>x.id!==b.dataset.del);
+      if(row) logActivity('delete','downtime','Downtime dihapus: '+fmtDate(row.tanggal)+' — '+escapeHtml(mesinName(row.mesinId))+' ('+escapeHtml(row.kategori)+')');
       saveDB(); renderTable(); toast('Data dihapus.');
     });
   }
@@ -2012,6 +2064,7 @@ PAGE_RENDERERS.downtime = function(mount){
       ['tanggal','shift','mesinId','kategori','keterangan'].forEach(f=> obj[f]=fd.get(f));
       obj.durasiMenit = parseFloat(fd.get('durasiMenit'))||0;
       if(!editing) DB.downtime.push(obj);
+      logActivity(editing?'update':'create','downtime','Downtime '+(editing?'diperbarui':'ditambahkan')+': '+fmtDate(obj.tanggal)+' — '+escapeHtml(mesinName(obj.mesinId))+' ('+escapeHtml(obj.kategori)+')');
       saveDB(); closeModal(); renderTable(); toast(editing?'Perubahan disimpan.':'Downtime ditambahkan.');
     };
   }
@@ -2433,7 +2486,8 @@ PAGE_RENDERERS.oeeGuide = function(mount){
         <p style="font-size:13.5px;line-height:1.7;color:var(--ink-200);">
           <b style="color:var(--paper);">OEE</b> adalah metrik standar industri untuk mengukur seberapa efektif suatu mesin atau lini produksi
           dimanfaatkan dibandingkan potensi idealnya (100%). Konsep ini dikembangkan oleh <b>Seiichi Nakajima</b> pada tahun 1960-an
-          sebagai bagian dari <b>Total Productive Maintenance (TPM)</b> di Jepang, dan kini dipakai luas di industri manufaktur untuk mengukur produktivitas riil, bukan sekadar target produksi.
+          sebagai bagian dari <b>Total Productive Maintenance (TPM)</b> di Jepang, dan kini dipakai luas di industri manufaktur
+          (termasuk manufaktur parfum/maklon seperti PT MMI) untuk mengukur produktivitas riil, bukan sekadar target produksi.
         </p>
         <p style="font-size:13.5px;line-height:1.7;color:var(--ink-200);margin-top:10px;">
           OEE menggabungkan tiga faktor kerugian produksi ke dalam satu angka:
@@ -2572,6 +2626,84 @@ PAGE_RENDERERS.oeeGuide = function(mount){
   draw();
 };
 
+/* =====================================================
+   LOG AKTIVITAS (audit trail — Manager & Super Admin)
+===================================================== */
+const ACTION_LABEL = {create:'Tambah', update:'Ubah', delete:'Hapus', login:'Login', logout:'Logout', export:'Ekspor', import:'Impor', reset:'Reset'};
+const ACTION_PILL = {create:'good', update:'warn', delete:'bad', login:'good', logout:'', export:'', import:'warn', reset:'bad'};
+const MODULE_LABEL = {produk:'Produk Jadi', mesin:'Mesin', operator:'Operator', kapasitas:'Kapasitas Produksi', oeeInput:'Input OEE', downtime:'Downtime', shiftMaster:'Waktu Kerja', settings:'Pengaturan', users:'Pengguna', auth:'Autentikasi'};
+
+PAGE_RENDERERS.activityLog = function(mount){
+  let filterFrom='', filterTo='', filterModule='', filterAction='', filterUser='';
+
+  function getRows(){
+    let rows = (DB.activityLog||[]).slice().sort((a,b)=> b.ts.localeCompare(a.ts));
+    if(filterFrom) rows = rows.filter(r=> r.ts.slice(0,10) >= filterFrom);
+    if(filterTo) rows = rows.filter(r=> r.ts.slice(0,10) <= filterTo);
+    if(filterModule) rows = rows.filter(r=> r.module===filterModule);
+    if(filterAction) rows = rows.filter(r=> r.action===filterAction);
+    if(filterUser){
+      const s = filterUser.toLowerCase();
+      rows = rows.filter(r=> (r.userName||'').toLowerCase().includes(s));
+    }
+    return rows;
+  }
+  function fmtTs(ts){
+    try{ return new Date(ts).toLocaleString('id-ID', {dateStyle:'medium', timeStyle:'short'}); }catch(e){ return ts; }
+  }
+  function renderTable(){
+    const rows = getRows().slice(0,300); // batasi tampilan agar tetap ringan
+    document.getElementById('logTableBody').innerHTML = rows.length ? rows.map(r=>`
+      <tr>
+        <td style="white-space:nowrap;">${fmtTs(r.ts)}</td>
+        <td>${escapeHtml(r.userName||'–')}</td>
+        <td><span class="pill">${escapeHtml(ROLE_LABEL[r.role]||r.role||'–')}</span></td>
+        <td><span class="pill ${ACTION_PILL[r.action]||''}">${escapeHtml(ACTION_LABEL[r.action]||r.action)}</span></td>
+        <td>${escapeHtml(MODULE_LABEL[r.module]||r.module)}</td>
+        <td>${escapeHtml(r.description||'–')}</td>
+      </tr>`).join('') : `<tr class="empty-row"><td colspan="6">Belum ada aktivitas tercatat pada filter ini.</td></tr>`;
+    document.getElementById('logCount').textContent = getRows().length+' entri'+(getRows().length>300?' (menampilkan 300 terbaru)':'');
+  }
+  function exportCsv(){
+    const rows = getRows();
+    const header = ['Waktu','Pengguna','Role','Aksi','Modul','Keterangan'];
+    const lines = [header.join(',')].concat(rows.map(r=>[
+      fmtTs(r.ts), r.userName||'', ROLE_LABEL[r.role]||r.role||'', ACTION_LABEL[r.action]||r.action, MODULE_LABEL[r.module]||r.module, (r.description||'').replace(/,/g,';')
+    ].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')));
+    const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'log-aktivitas-oee-mmi-'+todayStr()+'.csv'; a.click();
+  }
+
+  mount.innerHTML = `
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <input type="date" class="select-sm" id="logFrom"> <span style="color:var(--ink-400);font-size:12px;">s/d</span>
+        <input type="date" class="select-sm" id="logTo">
+        <select class="select-sm" id="logModule"><option value="">Semua Modul</option>${Object.entries(MODULE_LABEL).map(([k,l])=>`<option value="${k}">${escapeHtml(l)}</option>`).join('')}</select>
+        <select class="select-sm" id="logAction"><option value="">Semua Aksi</option>${Object.entries(ACTION_LABEL).map(([k,l])=>`<option value="${k}">${escapeHtml(l)}</option>`).join('')}</select>
+        <input type="text" class="search-input" id="logUser" placeholder="Cari nama pengguna...">
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="pill" id="logCount">–</span>
+        <button class="btn btn-ghost btn-sm" id="exportLogBtn">⬇ Ekspor CSV</button>
+      </div>
+    </div>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Waktu</th><th>Pengguna</th><th>Role</th><th>Aksi</th><th>Modul</th><th>Keterangan</th></tr></thead>
+      <tbody id="logTableBody"></tbody>
+    </table></div>
+    <p style="font-size:11.5px;color:var(--ink-400);margin-top:10px;">Log bersifat tambah-saja (append-only) dan otomatis menyimpan 1.000 aktivitas terbaru.</p>
+  `;
+  renderTable();
+  document.getElementById('logFrom').oninput = e=>{filterFrom=e.target.value; renderTable();};
+  document.getElementById('logTo').oninput = e=>{filterTo=e.target.value; renderTable();};
+  document.getElementById('logModule').onchange = e=>{filterModule=e.target.value; renderTable();};
+  document.getElementById('logAction').onchange = e=>{filterAction=e.target.value; renderTable();};
+  document.getElementById('logUser').oninput = e=>{filterUser=e.target.value; renderTable();};
+  document.getElementById('exportLogBtn').onclick = exportCsv;
+};
+
 PAGE_RENDERERS.settings = function(mount){
   function draw(){
     mount.innerHTML = `
@@ -2617,6 +2749,7 @@ PAGE_RENDERERS.settings = function(mount){
 
     document.getElementById('saveCompanyBtn').onclick = ()=>{
       DB.settings.companyName = document.getElementById('setCompany').value.trim() || DB.settings.companyName;
+      logActivity('update','settings','Informasi perusahaan diperbarui: '+escapeHtml(DB.settings.companyName));
       saveDB(); toast('Informasi perusahaan disimpan.');
     };
     document.getElementById('saveTargetBtn').onclick = ()=>{
@@ -2626,6 +2759,7 @@ PAGE_RENDERERS.settings = function(mount){
         performance: (parseFloat(document.getElementById('tPerf').value)||95)/100,
         quality: (parseFloat(document.getElementById('tQual').value)||99)/100,
       };
+      logActivity('update','settings','Target OEE diperbarui.');
       saveDB(); toast('Target OEE disimpan.');
     };
     document.getElementById('addCatBtn').onclick = ()=>{
@@ -2633,25 +2767,35 @@ PAGE_RENDERERS.settings = function(mount){
       const v = inp.value.trim();
       if(!v) return;
       if(!DB.settings.downtimeCategories.includes(v)) DB.settings.downtimeCategories.push(v);
+      logActivity('create','settings','Kategori downtime ditambahkan: '+escapeHtml(v));
       saveDB(); inp.value=''; renderCatChips(); toast('Kategori ditambahkan.');
     };
     document.getElementById('exportBtn').onclick = ()=>{
       const blob = new Blob([JSON.stringify(DB,null,2)], {type:'application/json'});
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob); a.download = 'oee-mmi-backup-'+todayStr()+'.json'; a.click();
+      logActivity('export','settings','Data diekspor ke berkas JSON.');
+      saveDB();
     };
     document.getElementById('importFile').onchange = (e)=>{
       const file = e.target.files[0]; if(!file) return;
       const reader = new FileReader();
       reader.onload = ()=>{
-        try{ const parsed = JSON.parse(reader.result); DB = parsed; saveDB(); toast('Data berhasil dipulihkan.'); draw(); }
+        try{
+          const parsed = JSON.parse(reader.result);
+          DB = parsed;
+          logActivity('import','settings','Data dipulihkan dari berkas cadangan JSON.');
+          saveDB(); toast('Data berhasil dipulihkan.'); draw();
+        }
         catch(err){ toast('Berkas tidak valid.', true); }
       };
       reader.readAsText(file);
     };
     document.getElementById('resetBtn').onclick = ()=>{
       if(!confirm('Semua data akan diganti dengan data contoh. Lanjutkan?')) return;
-      DB = seedData(); saveDB(); toast('Data direset ke contoh.'); draw();
+      DB = seedData();
+      logActivity('reset','settings','Data direset ke data contoh.');
+      saveDB(); toast('Data direset ke contoh.'); draw();
     };
   }
   function renderCatChips(){
@@ -2795,21 +2939,23 @@ async function onSignedIn(user){
     let prof = profSnap.exists() ? profSnap.val() : null;
 
     if(!prof){
-      // Pengguna pertama pada database kosong otomatis menjadi Manager (admin awal).
+      // Pengguna pertama pada database kosong otomatis menjadi Super Admin (admin awal, akses penuh).
       const allSnap = await fbDb.ref(USERS_PATH).get();
       if(!allSnap.exists()){
-        prof = {email:user.email, nama:user.email.split('@')[0], role:'manager', area:'Produksi'};
+        prof = {email:user.email, nama:user.email.split('@')[0], role:'superadmin', area:'Produksi'};
         await fbDb.ref(USERS_PATH+'/'+user.uid).set(prof);
       }else{
         await fbAuth.signOut();
         setLoginBusy(false);
-        loginErr('Akun Anda belum memiliki profil/role. Hubungi Manager untuk didaftarkan.');
+        loginErr('Akun Anda belum memiliki profil/role. Hubungi Manager atau Super Admin untuk didaftarkan.');
         return;
       }
     }
     SESSION = {uid:user.uid, id:user.uid, email:user.email, nama:prof.nama, role:prof.role, area:prof.area||''};
     await loadDB();
     await loadUsers();
+    logActivity('login','auth','Login berhasil.');
+    saveDB();
     setLoginBusy(false);
     showApp();
   }catch(err){
@@ -2820,6 +2966,7 @@ async function onSignedIn(user){
 }
 
 function doLogout(){
+  if(SESSION){ logActivity('logout','auth','Logout.'); saveDB(); }
   if(FB_READY){ try{ fbDb.ref(DATA_PATH).off(); }catch(e){} fbAuth.signOut(); }
   SESSION = null;
   document.getElementById('app').classList.remove('active');
